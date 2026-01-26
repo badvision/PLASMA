@@ -44,14 +44,22 @@ include "inc/fpstr.plh"      // import fpstr
 include "inc/sane.plh"       // import sane (fixed to properly close import block)
 
 //
+// Comparison result constants (from fpu.plh/fpumf.plh)
+//
+const FPUCMPGT = $4040      // Greater Than
+const FPUCMPLT = $8080      // Less Than
+const FPUCMPEQ = $0002      // EQual
+
+//
 // Predefs for all exported functions (MUST come before export table)
 //
 predef reset, getEnv, setEnv(env), testExcept(except), setExcept(except), enterProc(pEnv), exitProc(env)
 predef constPi, constE
-predef pushInt(pInt), pushSgl(pSgl), pushDbl(pDbl), pushExt(pExt), pushStr(pStr)
-predef pullInt(pInt), pullSgl(pSgl), pullDbl(pDbl), pullExt(pExt), pullStr(pStr,intdigits,fracdigits,format)
-predef loadInt(pInt,reg), loadSgl(pSgl,reg), loadDbl(pDbl,reg), loadExt(pExt,reg), loadStr(pStr,reg)
-predef storInt(pInt,reg), storSgl(pSgl,reg), storDbl(pDbl,reg), storExt(pExt,reg), storStr(pStr,intdigits,fracdigits,format,reg)
+predef pushInt(pInt), pushSgl(pSgl), pushDbl(pDbl), pushMBF(pMBF), pushStr(pStr)
+predef pullInt(pInt), pullSgl(pSgl), pullDbl(pDbl), pullMBF(pMBF), pullStr(pStr,intdigits,fracdigits,format)
+predef loadInt(pInt,reg), loadSgl(pSgl,reg), loadDbl(pDbl,reg), loadMBF(pMBF,reg), loadStr(pStr,reg)
+predef storInt(pInt,reg), storSgl(pSgl,reg), storDbl(pDbl,reg), storMBF(pMBF,reg), storStr(pStr,intdigits,fracdigits,format,reg)
+predef pushExt(pExt), pullExt(pExt), loadExt(pExt,reg), storExt(pExt,reg)
 predef shiftUp, shiftDown, rotateUp, rotateDown, dup, swap, clear
 predef add, sub, mul, div, rem
 predef neg, abs, type, cmp, logb, scalb(scale), trunc, round, sqrt, squared
@@ -66,10 +74,10 @@ predef compXY, annuityXY, randNum(pSeed)
 word fpumf = @reset
 word = @getEnv, @setEnv, @testExcept, @setExcept, @enterProc, @exitProc
 word = @constPi, @constE
-word = @pushInt, @pushSgl, @pushDbl, @pushExt, @pushStr
-word = @pullInt, @pullSgl, @pullDbl, @pullExt, @pullStr
-word = @loadInt, @loadSgl, @loadDbl, @loadExt, @loadStr
-word = @storInt, @storSgl, @storDbl, @storExt, @storStr
+word = @pushInt, @pushSgl, @pushDbl, @pushMBF, @pushStr
+word = @pullInt, @pullSgl, @pullDbl, @pullMBF, @pullStr
+word = @loadInt, @loadSgl, @loadDbl, @loadMBF, @loadStr
+word = @storInt, @storSgl, @storDbl, @storMBF, @storStr
 word = @shiftUp, @shiftDown, @rotateUp, @rotateDown, @dup, @swap, @clear
 word = @add, @sub, @mul, @div, @rem
 word = @neg, @abs, @type, @cmp
@@ -80,7 +88,7 @@ word = @log2X, @log21X, @lnX, @ln1X, @pow2X, @pow21X, @powEX, @powE1X, @powE21X,
 word = @compXY, @annuityXY, @randNum
 
 //
-// Useful constants (same as fpu.pla)
+// Useful constants (Extended format for SANE fallback)
 //
 byte ext_pi[t_extended]     = $35,$C2,$68,$21,$A2,$DA,$0F,$C9,$00,$40
 byte ext_e[t_extended]      = $9B,$4A,$BB,$A2,$5B,$54,$F8,$AD,$00,$40
@@ -91,9 +99,18 @@ byte ext_two[t_extended]    = 0  ,$40,$80,0  ,0  ,0  ,0  ,0  ,0  ,0
 byte ext_negOne[t_extended] = $FF,$3F,$80,0  ,0  ,0  ,0  ,0  ,0  ,0
 
 //
-// FP Stack (4 extended precision registers)
+// MBF format constants for hardware operations
+// These are initialized in reset() by converting from Extended
 //
-byte stack[t_extended*4]
+byte[MBF_SIZE] mbf_one
+byte[MBF_SIZE] mbf_two
+byte[MBF_SIZE] mbf_negOne
+byte[MBF_SIZE] mbf_ln2
+
+//
+// FP Stack (4 MBF format registers - 7 bytes each)
+//
+byte stack[MBF_SIZE*4]
 word stackRegs[4]
 
 //
@@ -333,11 +350,12 @@ end
 //   Byte 0-1: Sign (bit 15) + Exponent (bits 14-0, bias 16383)
 //   Byte 2-9: 64-bit mantissa (bit 63 is explicit integer bit)
 //
-// MBF format:
-//   Byte 0: Exponent (bias 128, 0 = zero)
-//   Byte 1: Sign (bit 7) + Mantissa MSB (bits 6-0, no explicit integer bit)
-//   Byte 2-5: Mantissa continuation
-//   (Optional byte 6: Extension for extra precision)
+// MBF format (7 bytes):
+//   Byte 0: Exponent (bias 129, 0 = zero)
+//   Byte 1: Mantissa MSB (bits 6-0, no explicit integer bit, bit 7 unused)
+//   Byte 2-4: Mantissa continuation (24 bits)
+//   Byte 5: Sign bit (bit 7) + unused (bits 6-0)
+//   Byte 6: Extension for extra precision (8 bits)
 //
 def extendedToMBF(pExt, pMBF)
     word expWord, i
@@ -500,19 +518,19 @@ end
 
 def shiftUp
     stackRegs[0], stackRegs[1], stackRegs[2], stackRegs[3] = stackRegs[3], stackRegs[0], stackRegs[1], stackRegs[2]
-    memcpy(stackRegs[0], stackRegs[1], t_extended)
+    memcpy(stackRegs[0], stackRegs[1], MBF_SIZE)
     return 0
 end
 
 def shiftDown // drop
     stackRegs[0], stackRegs[1], stackRegs[2], stackRegs[3] = stackRegs[1], stackRegs[2], stackRegs[3], stackRegs[0]
-    memcpy(stackRegs[3], stackRegs[2], t_extended)
+    memcpy(stackRegs[3], stackRegs[2], MBF_SIZE)
     return 0
 end
 
 def _drop(passthru) // Internal version with passthru
     stackRegs[0], stackRegs[1], stackRegs[2], stackRegs[3] = stackRegs[1], stackRegs[2], stackRegs[3], stackRegs[0]
-    memcpy(stackRegs[3], stackRegs[2], t_extended)
+    memcpy(stackRegs[3], stackRegs[2], MBF_SIZE)
     return passthru
 end
 
@@ -528,7 +546,7 @@ end
 
 def dup
     stackRegs[0], stackRegs[1], stackRegs[2], stackRegs[3] = stackRegs[3], stackRegs[0], stackRegs[1], stackRegs[2]
-    memcpy(stackRegs[0], stackRegs[1], t_extended)
+    memcpy(stackRegs[0], stackRegs[1], MBF_SIZE)
     return 0
 end
 
@@ -553,87 +571,267 @@ end
 // STACK ACCESS ROUTINES
 //==============================================================================
 def pushInt(pInt)
+    byte err
+    byte[t_extended] tempExt
+
     stackRegs[0], stackRegs[1], stackRegs[2], stackRegs[3] = stackRegs[3], stackRegs[0], stackRegs[1], stackRegs[2]
+
+    // Convert integer to Extended format using SANE
     sane:saveZP()
-    return sane:restoreZP(sane:op2FP(FFINT|FOZ2X, stackRegs[0], pInt))
+    err = sane:restoreZP(sane:op2FP(FFINT|FOZ2X, @tempExt, pInt))
+    if err; return err; fin
+
+    // Convert Extended to MBF
+    err = extendedToMBF(@tempExt, stackRegs[0])
+
+    return err
 end
 def pullInt(pInt)
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert MBF to Extended
+    err = MBFToExtended(stackRegs[0], @tempExt)
+    if err; return _drop(err); fin
+
+    // Convert Extended to integer using SANE
     sane:saveZP()
-    return _drop(sane:restoreZP(sane:op2FP(FFINT|FOX2Z, pInt, stackRegs[0])))
+    err = sane:restoreZP(sane:op2FP(FFINT|FOX2Z, pInt, @tempExt))
+
+    return _drop(err)
 end
 def loadInt(pInt, reg)
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert integer to Extended using SANE
     sane:saveZP()
-    return sane:restoreZP(sane:op2FP(FFINT|FOZ2X, stackRegs[reg & $03], pInt))
+    err = sane:restoreZP(sane:op2FP(FFINT|FOZ2X, @tempExt, pInt))
+    if err; return err; fin
+
+    // Convert Extended to MBF
+    return extendedToMBF(@tempExt, stackRegs[reg & $03])
 end
 def storInt(pInt, reg)
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert MBF to Extended
+    err = MBFToExtended(stackRegs[reg & $03], @tempExt)
+    if err; return err; fin
+
+    // Convert Extended to integer using SANE
     sane:saveZP()
-    return sane:restoreZP(sane:op2FP(FFINT|FOX2Z, pInt, stackRegs[reg & $03]))
+    return sane:restoreZP(sane:op2FP(FFINT|FOX2Z, pInt, @tempExt))
 end
 def pushSgl(pSgl)
+    byte err
+    byte[t_extended] tempExt
+
     stackRegs[0], stackRegs[1], stackRegs[2], stackRegs[3] = stackRegs[3], stackRegs[0], stackRegs[1], stackRegs[2]
+
+    // Convert single to Extended using SANE
     sane:saveZP()
-    return sane:restoreZP(sane:op2FP(FFSGL|FOZ2X, stackRegs[0], pSgl))
+    err = sane:restoreZP(sane:op2FP(FFSGL|FOZ2X, @tempExt, pSgl))
+    if err; return err; fin
+
+    // Convert Extended to MBF
+    return extendedToMBF(@tempExt, stackRegs[0])
 end
 def pullSgl(pSgl)
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert MBF to Extended
+    err = MBFToExtended(stackRegs[0], @tempExt)
+    if err; return _drop(err); fin
+
+    // Convert Extended to single using SANE
     sane:saveZP()
-    return _drop(sane:restoreZP(sane:op2FP(FFSGL|FOX2Z, pSgl, stackRegs[0])))
+    err = sane:restoreZP(sane:op2FP(FFSGL|FOX2Z, pSgl, @tempExt))
+
+    return _drop(err)
 end
 def loadSgl(pSgl, reg)
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert single to Extended using SANE
     sane:saveZP()
-    return sane:restoreZP(sane:op2FP(FFSGL|FOZ2X, stackRegs[reg & $03], pSgl))
+    err = sane:restoreZP(sane:op2FP(FFSGL|FOZ2X, @tempExt, pSgl))
+    if err; return err; fin
+
+    // Convert Extended to MBF
+    return extendedToMBF(@tempExt, stackRegs[reg & $03])
 end
 def storSgl(pSgl, reg)
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert MBF to Extended
+    err = MBFToExtended(stackRegs[reg & $03], @tempExt)
+    if err; return err; fin
+
+    // Convert Extended to single using SANE
     sane:saveZP()
-    return sane:restoreZP(sane:op2FP(FFSGL|FOX2Z, pSgl, stackRegs[reg & $03]))
+    return sane:restoreZP(sane:op2FP(FFSGL|FOX2Z, pSgl, @tempExt))
 end
 def pushDbl(pDbl)
+    byte err
+    byte[t_extended] tempExt
+
     stackRegs[0], stackRegs[1], stackRegs[2], stackRegs[3] = stackRegs[3], stackRegs[0], stackRegs[1], stackRegs[2]
+
+    // Convert double to Extended using SANE
     sane:saveZP()
-    return sane:restoreZP(sane:op2FP(FFDBL|FOZ2X, stackRegs[0], pDbl))
+    err = sane:restoreZP(sane:op2FP(FFDBL|FOZ2X, @tempExt, pDbl))
+    if err; return err; fin
+
+    // Convert Extended to MBF
+    return extendedToMBF(@tempExt, stackRegs[0])
 end
 def pullDbl(pDbl)
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert MBF to Extended
+    err = MBFToExtended(stackRegs[0], @tempExt)
+    if err; return _drop(err); fin
+
+    // Convert Extended to double using SANE
     sane:saveZP()
-    return _drop(sane:restoreZP(sane:op2FP(FFDBL|FOX2Z, pDbl, stackRegs[0])))
+    err = sane:restoreZP(sane:op2FP(FFDBL|FOX2Z, pDbl, @tempExt))
+
+    return _drop(err)
 end
 def loadDbl(pDbl, reg)
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert double to Extended using SANE
     sane:saveZP()
-    return sane:restoreZP(sane:op2FP(FFDBL|FOZ2X, stackRegs[reg & $03], pDbl))
+    err = sane:restoreZP(sane:op2FP(FFDBL|FOZ2X, @tempExt, pDbl))
+    if err; return err; fin
+
+    // Convert Extended to MBF
+    return extendedToMBF(@tempExt, stackRegs[reg & $03])
 end
 def storDbl(pDbl, reg)
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert MBF to Extended
+    err = MBFToExtended(stackRegs[reg & $03], @tempExt)
+    if err; return err; fin
+
+    // Convert Extended to double using SANE
     sane:saveZP()
-    return sane:restoreZP(sane:op2FP(FFDBL|FOX2Z, pDbl, stackRegs[reg & $03]))
+    return sane:restoreZP(sane:op2FP(FFDBL|FOX2Z, pDbl, @tempExt))
 end
-def pushExt(pExt)
+//
+// NEW MBF-NATIVE API (Zero conversion overhead)
+//
+def pushMBF(pMBF)
     stackRegs[0], stackRegs[1], stackRegs[2], stackRegs[3] = stackRegs[3], stackRegs[0], stackRegs[1], stackRegs[2]
-    sane:saveZP()
-    return sane:restoreZP(sane:op2FP(FFEXT|FOZ2X, stackRegs[0], pExt))
+
+    // Direct copy of 7-byte MBF format - no conversion!
+    memcpy(stackRegs[0], pMBF, MBF_SIZE)
+
+    return 0
+end
+def pullMBF(pMBF)
+    // Direct copy of 7-byte MBF format - no conversion!
+    memcpy(pMBF, stackRegs[0], MBF_SIZE)
+
+    return _drop(0)
+end
+def loadMBF(pMBF, reg)
+    // Direct copy to specified register - no conversion!
+    memcpy(stackRegs[reg & $03], pMBF, MBF_SIZE)
+    return 0
+end
+def storMBF(pMBF, reg)
+    // Direct copy from specified register - no conversion!
+    memcpy(pMBF, stackRegs[reg & $03], MBF_SIZE)
+    return 0
+end
+
+//
+// LEGACY EXTENDED API (For backward compatibility - includes conversion overhead)
+//
+def pushExt(pExt)
+    byte err
+
+    stackRegs[0], stackRegs[1], stackRegs[2], stackRegs[3] = stackRegs[3], stackRegs[0], stackRegs[1], stackRegs[2]
+
+    // Convert Extended to MBF and store in stack
+    err = extendedToMBF(pExt, stackRegs[0])
+
+    return err
 end
 def pullExt(pExt)
-    sane:saveZP()
-    return _drop(sane:restoreZP(sane:op2FP(FFEXT|FOX2Z, pExt, stackRegs[0])))
+    byte err
+
+    // Convert MBF to Extended before returning
+    err = MBFToExtended(stackRegs[0], pExt)
+
+    return _drop(err)
 end
 def loadExt(pExt, reg)
-    sane:saveZP()
-    return sane:restoreZP(sane:op2FP(FFEXT|FOZ2X, stackRegs[reg & $03], pExt))
+    // Convert Extended to MBF and store in specified register
+    return extendedToMBF(pExt, stackRegs[reg & $03])
 end
 def storExt(pExt, reg)
-    sane:saveZP()
-    return sane:restoreZP(sane:op2FP(FFEXT|FOX2Z, pExt, stackRegs[reg & $03]))
+    // Convert MBF to Extended from specified register
+    return MBFToExtended(stackRegs[reg & $03], pExt)
 end
 def pushStr(pStr)
-    word result
+    byte err
+    byte[t_extended] tempExt
+
     stackRegs[0], stackRegs[1], stackRegs[2], stackRegs[3] = stackRegs[3], stackRegs[0], stackRegs[1], stackRegs[2]
-    result = str2ext(pStr, stackRegs[0])
-    return result
+
+    // Parse string to Extended format
+    err = str2ext(pStr, @tempExt)
+    if err; return err; fin
+
+    // Convert Extended to MBF
+    return extendedToMBF(@tempExt, stackRegs[0])
 end
 def pullStr(pStr, intdigits, fracdigits, format)
-    return _drop(ext2str(stackRegs[0], pStr, intdigits, fracdigits, format))
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert MBF to Extended
+    err = MBFToExtended(stackRegs[0], @tempExt)
+    if err; return _drop(err); fin
+
+    // Convert Extended to string
+    err = ext2str(@tempExt, pStr, intdigits, fracdigits, format)
+
+    return _drop(err)
 end
 def loadStr(pStr, reg)
-    return str2ext(pStr, stackRegs[reg])
+    byte err
+    byte[t_extended] tempExt
+
+    // Parse string to Extended format
+    err = str2ext(pStr, @tempExt)
+    if err; return err; fin
+
+    // Convert Extended to MBF
+    return extendedToMBF(@tempExt, stackRegs[reg])
 end
 def storStr(pStr, intdigits, fracdigits, format, reg)
-    return ext2str(stackRegs[reg], pStr, intdigits, fracdigits, format)
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert MBF to Extended
+    err = MBFToExtended(stackRegs[reg], @tempExt)
+    if err; return err; fin
+
+    // Convert Extended to string
+    return ext2str(@tempExt, pStr, intdigits, fracdigits, format)
 end
 
 //==============================================================================
@@ -645,34 +843,27 @@ end
 // Input: cmd = MegaFlash command code
 // Returns: error code (0 = success)
 //
+// Stack registers already contain MBF format - no conversions needed!
+//
 def execBinaryOp(cmd)
     byte err
-    byte[MBF_SIZE] mbfFAC, mbfARG, mbfResult
 
     if !mfAvailable
         // Fallback to SANE
         return -1  // Signal to use SANE
     fin
 
-    // Convert stack registers to MBF
-    err = extendedToMBF(stackRegs[0], @mbfFAC)
-    if err; return err; fin
-
-    err = extendedToMBF(stackRegs[1], @mbfARG)
-    if err; return err; fin
-
-    // Send to MegaFlash
-    sendFACARG(@mbfFAC, @mbfARG)
+    // Stack registers already in MBF format
+    // Map to match SANE semantics: SANE computes stackRegs[1] op stackRegs[0] (Y op X)
+    // So send Y->FAC, X->ARG, and MegaFlash computes FAC op ARG = Y op X
+    sendFACARG(stackRegs[1], stackRegs[0])
 
     // Execute command
     err = execMegaFlash(cmd)
     if err; return err; fin
 
-    // Get result
-    receiveFAC(@mbfResult)
-
-    // Convert back to extended and store in stack[1]
-    err = MBFToExtended(@mbfResult, stackRegs[1])
+    // Get result directly into stack[1] (already MBF format)
+    receiveFAC(stackRegs[1])
 
     return err
 end
@@ -680,18 +871,17 @@ end
 //
 // Helper function to execute unary operation on MegaFlash
 //
+// Stack registers already contain MBF format - no conversions needed!
+//
 def execUnaryOp(cmd)
     byte err
-    byte[MBF_SIZE] mbfFAC, mbfARG, mbfResult
+    byte[MBF_SIZE] mbfARG
 
     if !mfAvailable
         return -1  // Signal to use SANE
     fin
 
-    // Convert stack register to MBF
-    err = extendedToMBF(stackRegs[0], @mbfFAC)
-    if err; return err; fin
-
+    // Stack register already in MBF format
     // Set ARG to zero (not used for unary ops)
     mbfARG.0 = 0
     mbfARG.1 = 0
@@ -699,33 +889,36 @@ def execUnaryOp(cmd)
     mbfARG.3 = 0
     mbfARG.4 = 0
     mbfARG.5 = 0
+    mbfARG.6 = 0
 
-    // Send to MegaFlash
-    sendFACARG(@mbfFAC, @mbfARG)
+    // Send to MegaFlash (FAC = stackRegs[0], ARG = zero)
+    sendFACARG(stackRegs[0], @mbfARG)
 
     // Execute command
     err = execMegaFlash(cmd)
     if err; return err; fin
 
-    // Get result
-    err = receiveFAC(@mbfResult)
-    if err; return err; fin
-
-    // Convert back to extended
-    err = MBFToExtended(@mbfResult, stackRegs[0])
+    // Get result directly into stack[0] (already MBF format)
+    err = receiveFAC(stackRegs[0])
 
     return err
 end
 
 def add
     word err
+    byte[t_extended] tempExt0
+    byte[t_extended] tempExt1
 
     err = execBinaryOp(MF_CMD_FADD)
     if err < 0
-        // Use SANE fallback
-    
+        // Use SANE fallback - need to convert MBF to Extended
+        MBFToExtended(stackRegs[0], @tempExt0)
+        MBFToExtended(stackRegs[1], @tempExt1)
         sane:saveZP()
-        return _drop(sane:restoreZP(sane:op2FP(FFEXT|FOADD, stackRegs[1], stackRegs[0])))
+        err = sane:restoreZP(sane:op2FP(FFEXT|FOADD, @tempExt1, @tempExt0))
+        if err; return _drop(err); fin
+        err = extendedToMBF(@tempExt1, stackRegs[1])
+        return _drop(err)
     fin
 
     return _drop(err)
@@ -734,19 +927,33 @@ end
 def sub
     // MegaFlash doesn't have FSUB - use SANE fallback
     // (Could also implement as negate + add, but SANE is more reliable)
+    byte err
+    byte[t_extended] tempExt0
+    byte[t_extended] tempExt1
 
+    MBFToExtended(stackRegs[0], @tempExt0)
+    MBFToExtended(stackRegs[1], @tempExt1)
     sane:saveZP()
-    return _drop(sane:restoreZP(sane:op2FP(FFEXT|FOSUB, stackRegs[1], stackRegs[0])))
+    err = sane:restoreZP(sane:op2FP(FFEXT|FOSUB, @tempExt1, @tempExt0))
+    if err; return _drop(err); fin
+    err = extendedToMBF(@tempExt1, stackRegs[1])
+    return _drop(err)
 end
 
 def mul
     word err
+    byte[t_extended] tempExt0
+    byte[t_extended] tempExt1
 
     err = execBinaryOp(MF_CMD_FMUL)
     if err < 0
-
+        MBFToExtended(stackRegs[0], @tempExt0)
+        MBFToExtended(stackRegs[1], @tempExt1)
         sane:saveZP()
-        return _drop(sane:restoreZP(sane:op2FP(FFEXT|FOMUL, stackRegs[1], stackRegs[0])))
+        err = sane:restoreZP(sane:op2FP(FFEXT|FOMUL, @tempExt1, @tempExt0))
+        if err; return _drop(err); fin
+        err = extendedToMBF(@tempExt1, stackRegs[1])
+        return _drop(err)
     fin
 
     return _drop(err)
@@ -754,12 +961,18 @@ end
 
 def div
     word err
+    byte[t_extended] tempExt0
+    byte[t_extended] tempExt1
 
     err = execBinaryOp(MF_CMD_FDIV)
     if err < 0
-    
+        MBFToExtended(stackRegs[0], @tempExt0)
+        MBFToExtended(stackRegs[1], @tempExt1)
         sane:saveZP()
-        return _drop(sane:restoreZP(sane:op2FP(FFEXT|FODIV, stackRegs[1], stackRegs[0])))
+        err = sane:restoreZP(sane:op2FP(FFEXT|FODIV, @tempExt1, @tempExt0))
+        if err; return _drop(err); fin
+        err = extendedToMBF(@tempExt1, stackRegs[1])
+        return _drop(err)
     fin
 
     return _drop(err)
@@ -767,32 +980,43 @@ end
 
 def rem
     // MegaFlash doesn't support REM - use SANE
+    byte err
+    byte[t_extended] tempExt0
+    byte[t_extended] tempExt1
 
+    MBFToExtended(stackRegs[0], @tempExt0)
+    MBFToExtended(stackRegs[1], @tempExt1)
     sane:saveZP()
-    return _drop(sane:restoreZP(sane:op2FP(FFEXT|FOREM, stackRegs[1], stackRegs[0])))
+    err = sane:restoreZP(sane:op2FP(FFEXT|FOREM, @tempExt1, @tempExt0))
+    if err; return _drop(err); fin
+    err = extendedToMBF(@tempExt1, stackRegs[1])
+    return _drop(err)
 end
 
 def neg
     // neg(x) = x * -1 (preserves precision, uses hardware mul)
     word err
+    byte[t_extended] tempExt
 
     if !mfAvailable
-        // Fallback to SANE
-    
+        // Fallback to SANE - need to convert MBF to Extended
+        MBFToExtended(stackRegs[0], @tempExt)
         sane:saveZP()
-        return sane:restoreZP(sane:op1FP(FFEXT|FONEG, stackRegs[0]))
+        err = sane:restoreZP(sane:op1FP(FFEXT|FONEG, @tempExt))
+        if err; return err; fin
+        return extendedToMBF(@tempExt, stackRegs[0])
     fin
 
-    // Multiply by -1
-    memcpy(stackRegs[1], stackRegs[0], t_extended)
-    memcpy(stackRegs[0], @ext_negOne, t_extended)
+    // Multiply by -1 (both operands already in MBF)
+    memcpy(stackRegs[1], stackRegs[0], MBF_SIZE)
+    memcpy(stackRegs[0], @mbf_negOne, MBF_SIZE)
     return _drop(execBinaryOp(MF_CMD_FMUL))
 end
 
 def abs
     // abs(x) = x if x >= 0, else -x
-    // Check sign bit and negate if needed
-    if stackRegs[0]->0 & $80
+    // Check sign bit in byte 5 (MBF format) and negate if needed
+    if stackRegs[0]->5 & $80
         // Negative - negate it
         return neg
     fin
@@ -802,40 +1026,124 @@ end
 
 def type
     // Type classification - use SANE
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert MBF to Extended
+    err = MBFToExtended(stackRegs[0], @tempExt)
+    if err; return err; fin
 
     sane:saveZP()
-    return sane:restoreZP(sane:op1FP(FFEXT|FOCLASS, stackRegs[0]))
+    return sane:restoreZP(sane:op1FP(FFEXT|FOCLASS, @tempExt))
 end
 
 def cmp
-    // Comparison - use SANE
+    // Comparison optimized to use hardware subtract
+    // cmp computes Y - X and returns sign:
+    //   FPUCMPGT ($4040) if Y > X (result positive)
+    //   FPUCMPEQ ($0002) if Y == X (result zero)
+    //   FPUCMPLT ($8080) if Y < X (result negative)
+    byte err
+    byte[t_extended] tempExt0
+    byte[t_extended] tempExt1
+    byte[MBF_SIZE] mbfTemp
 
-    sane:saveZP()
-    return sane:restoreZP(sane:op2FP(FFEXT|FOCMP, stackRegs[1], stackRegs[0]))
+    if !mfAvailable
+        // Fallback to SANE
+        MBFToExtended(stackRegs[0], @tempExt0)
+        MBFToExtended(stackRegs[1], @tempExt1)
+        sane:saveZP()
+        return sane:restoreZP(sane:op2FP(FFEXT|FOCMP, @tempExt1, @tempExt0))
+    fin
+
+    // Hardware path: Compute Y - X using negate + add
+    // Save Y (stackRegs[1])
+    memcpy(@mbfTemp, stackRegs[1], MBF_SIZE)
+
+    // Negate X: stackRegs[0] = -X
+    // Flip sign bit in byte 5
+    if stackRegs[0]->5 & $80
+        stackRegs[0]->5 = stackRegs[0]->5 & $7F  // Clear sign bit (negative -> positive)
+    else
+        stackRegs[0]->5 = stackRegs[0]->5 | $80  // Set sign bit (positive -> negative)
+    fin
+
+    // Compute Y + (-X) = Y - X
+    // stackRegs[1] = Y, stackRegs[0] = -X
+    err = execBinaryOp(MF_CMD_FADD)
+    if err < 0
+        // Hardware failed, use SANE fallback
+        MBFToExtended(stackRegs[0], @tempExt0)
+        MBFToExtended(@mbfTemp, @tempExt1)
+        sane:saveZP()
+        return sane:restoreZP(sane:op2FP(FFEXT|FOCMP, @tempExt1, @tempExt0))
+    fin
+
+    // Result is in stackRegs[1] (Y - X)
+    // Check for zero: exponent byte (byte 0) == 0
+    if stackRegs[1]->0 == 0
+        return FPUCMPEQ  // $0002
+    fin
+
+    // SANE cmp() has COUNTERINTUITIVE semantics (verified by observation):
+    // Hardware performs Y - X:
+    //   - When Y < X: Y - X is negative, but SANE returns FPUCMPGT (16448)
+    //   - When Y > X: Y - X is positive, but SANE returns FPUCMPLT (-32640)
+    // This is backwards from intuition, but matches SANE's actual behavior!
+    if stackRegs[1]->5 & $80
+        return FPUCMPGT  // $4040 (Y - X negative means Y < X, return GT - counterintuitive!)
+    fin
+
+    return FPUCMPLT  // $8080 (Y - X positive means Y > X, return LT - counterintuitive!)
 end
 
 def trunc
     // Truncate - use SANE
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert MBF to Extended
+    err = MBFToExtended(stackRegs[0], @tempExt)
+    if err; return err; fin
 
     sane:saveZP()
-    return sane:restoreZP(sane:op1FP(FFEXT|FOTTI, stackRegs[0]))
+    err = sane:restoreZP(sane:op1FP(FFEXT|FOTTI, @tempExt))
+    if err; return err; fin
+
+    // Convert result back to MBF
+    return extendedToMBF(@tempExt, stackRegs[0])
 end
 
 def round
     // Round - use SANE
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert MBF to Extended
+    err = MBFToExtended(stackRegs[0], @tempExt)
+    if err; return err; fin
 
     sane:saveZP()
-    return sane:restoreZP(sane:op1FP(FFEXT|FORTI, stackRegs[0]))
+    err = sane:restoreZP(sane:op1FP(FFEXT|FORTI, @tempExt))
+    if err; return err; fin
+
+    // Convert result back to MBF
+    return extendedToMBF(@tempExt, stackRegs[0])
 end
 
 def sqrt
     word err
+    byte[t_extended] tempExt
 
     err = execUnaryOp(MF_CMD_FSQR)
     if err < 0
-    
+        // Convert MBF to Extended for SANE fallback
+        MBFToExtended(stackRegs[0], @tempExt)
         sane:saveZP()
-        return sane:restoreZP(sane:op1FP(FFEXT|FOSQRT, stackRegs[0]))
+        err = sane:restoreZP(sane:op1FP(FFEXT|FOSQRT, @tempExt))
+        if err; return err; fin
+        // Convert result back to MBF
+        return extendedToMBF(@tempExt, stackRegs[0])
     fin
 
     return err
@@ -843,14 +1151,19 @@ end
 
 def squared
     word err
+    byte[t_extended] tempExt
 
     // Square by multiplying by itself
-    memcpy(stackRegs[1], stackRegs[0], t_extended)
+    memcpy(stackRegs[1], stackRegs[0], MBF_SIZE)
     err = execBinaryOp(MF_CMD_FMUL)
     if err < 0
-
+        // Convert MBF to Extended for SANE fallback
+        MBFToExtended(stackRegs[1], @tempExt)
         sane:saveZP()
-        return sane:restoreZP(sane:op2FP(FFEXT|FOMUL, stackRegs[0], stackRegs[0]))
+        err = sane:restoreZP(sane:op2FP(FFEXT|FOMUL, @tempExt, @tempExt))
+        if err; return _drop(err); fin
+        // Convert result back to MBF
+        return _drop(extendedToMBF(@tempExt, stackRegs[1]))
     fin
 
     return _drop(err)
@@ -858,9 +1171,19 @@ end
 
 def logb
     // Log base - use SANE
+    byte err
+    byte[t_extended] tempExt
+
+    // Convert MBF to Extended
+    err = MBFToExtended(stackRegs[0], @tempExt)
+    if err; return err; fin
 
     sane:saveZP()
-    return sane:restoreZP(sane:op1FP(FFEXT|FOLOGB, stackRegs[0]))
+    err = sane:restoreZP(sane:op1FP(FFEXT|FOLOGB, @tempExt))
+    if err; return err; fin
+
+    // Convert result back to MBF
+    return extendedToMBF(@tempExt, stackRegs[0])
 end
 
 def scalb(scale)
@@ -957,18 +1280,21 @@ def log2X
     // log2(x) = ln(x) / ln(2)
     // Use hardware ln, then divide by ln(2)
     word err
+    byte[t_extended] tempExt
 
     // Compute ln(x)
     err = execUnaryOp(MF_CMD_FLOG)
     if err < 0
         // Fallback to SANE
-    
+        MBFToExtended(stackRegs[0], @tempExt)
         sane:saveZP()
-        return sane:restoreZP(sane:op1ELEM(FFEXT|FOLOG2X, stackRegs[0]))
+        err = sane:restoreZP(sane:op1ELEM(FFEXT|FOLOG2X, @tempExt))
+        if err; return err; fin
+        return extendedToMBF(@tempExt, stackRegs[0])
     fin
 
-    // Divide by ln(2)
-    memcpy(stackRegs[1], @ext_ln2, t_extended)
+    // Divide by ln(2) (both operands in MBF)
+    memcpy(stackRegs[1], @mbf_ln2, MBF_SIZE)
     swap
     return div
 end
@@ -992,7 +1318,7 @@ def log21X
     fin
 
     // Divide by ln(2)
-    memcpy(stackRegs[1], @ext_ln2, t_extended)
+    memcpy(stackRegs[1], @mbf_ln2, MBF_SIZE)
     swap
     return div
 end
@@ -1022,7 +1348,7 @@ def ln1X
     fin
 
     // Compute 1 + x
-    memcpy(stackRegs[1], @ext_one, t_extended)
+    memcpy(stackRegs[1], @mbf_one, MBF_SIZE)
     err = add
     if err < 0
         // Fallback
@@ -1040,8 +1366,8 @@ def pow2X
     word err
 
     // Multiply x by ln(2)
-    memcpy(stackRegs[1], stackRegs[0], t_extended)
-    memcpy(stackRegs[0], @ext_ln2, t_extended)
+    memcpy(stackRegs[1], stackRegs[0], MBF_SIZE)
+    memcpy(stackRegs[0], @mbf_ln2, MBF_SIZE)
     err = execBinaryOp(MF_CMD_FMUL)
     if err < 0
         // Fallback
@@ -1065,8 +1391,8 @@ def pow21X
     fin
 
     // Multiply x by ln(2)
-    memcpy(stackRegs[1], stackRegs[0], t_extended)
-    memcpy(stackRegs[0], @ext_ln2, t_extended)
+    memcpy(stackRegs[1], stackRegs[0], MBF_SIZE)
+    memcpy(stackRegs[0], @mbf_ln2, MBF_SIZE)
     err = execBinaryOp(MF_CMD_FMUL)
     if err < 0
     
@@ -1079,7 +1405,7 @@ def pow21X
     if err; return err; fin
 
     // Subtract 1
-    memcpy(stackRegs[1], @ext_one, t_extended)
+    memcpy(stackRegs[1], @mbf_one, MBF_SIZE)
     return sub
 end
 
@@ -1115,7 +1441,7 @@ def powE1X
     fin
 
     // Subtract 1
-    memcpy(stackRegs[1], @ext_one, t_extended)
+    memcpy(stackRegs[1], @mbf_one, MBF_SIZE)
     return sub
 end
 
@@ -1130,8 +1456,8 @@ def powE21X
     fin
 
     // Multiply x by 2
-    memcpy(stackRegs[1], stackRegs[0], t_extended)
-    memcpy(stackRegs[0], @ext_two, t_extended)
+    memcpy(stackRegs[1], stackRegs[0], MBF_SIZE)
+    memcpy(stackRegs[0], @mbf_two, MBF_SIZE)
     err = execBinaryOp(MF_CMD_FMUL)
     if err < 0
     
@@ -1144,7 +1470,7 @@ def powE21X
     if err; return err; fin
 
     // Subtract 1
-    memcpy(stackRegs[1], @ext_one, t_extended)
+    memcpy(stackRegs[1], @mbf_one, MBF_SIZE)
     return sub
 end
 
@@ -1231,7 +1557,7 @@ def asin
     if err; return _drop(err); fin
 
     // Compute 1 - x²
-    memcpy(stackRegs[1], @ext_one, t_extended)
+    memcpy(stackRegs[1], @mbf_one, MBF_SIZE)
     swap
     neg
     add  // 1 + (-x²)
@@ -1299,7 +1625,7 @@ def sinh
     sub                    // Stack: (e^x - e^-x) [sub drops e^-x]
 
     // Divide by 2 - Stack: (e^x - e^-x)
-    memcpy(stackRegs[1], @ext_two, t_extended)  // Load 2 into stack[1]
+    memcpy(stackRegs[1], @mbf_two, MBF_SIZE)  // Load 2 into stack[1]
     swap                   // Stack: 2, (e^x - e^-x)
     return div             // (e^x - e^-x) / 2 [div drops 2]
 end
@@ -1334,7 +1660,7 @@ def cosh
     add                    // Stack: (e^x + e^-x) [add drops e^-x]
 
     // Divide by 2 - Stack: (e^x + e^-x)
-    memcpy(stackRegs[1], @ext_two, t_extended)  // Load 2 into stack[1]
+    memcpy(stackRegs[1], @mbf_two, MBF_SIZE)  // Load 2 into stack[1]
     swap                   // Stack: 2, (e^x + e^-x)
     return div             // (e^x + e^-x) / 2 [div drops 2]
 end
@@ -1386,7 +1712,7 @@ def sec
     if err; return err; fin
 
     // Compute 1 / cos(x)
-    memcpy(stackRegs[1], @ext_one, t_extended)
+    memcpy(stackRegs[1], @mbf_one, MBF_SIZE)
     swap
     return div
 end
@@ -1408,7 +1734,7 @@ def csc
     if err; return err; fin
 
     // Compute 1 / sin(x)
-    memcpy(stackRegs[1], @ext_one, t_extended)
+    memcpy(stackRegs[1], @mbf_one, MBF_SIZE)
     swap
     return div
 end
@@ -1429,7 +1755,7 @@ def cot
     if err; return err; fin
 
     // Compute 1 / tan(x)
-    memcpy(stackRegs[1], @ext_one, t_extended)
+    memcpy(stackRegs[1], @mbf_one, MBF_SIZE)
     swap
     return div
 end
@@ -1453,8 +1779,8 @@ def compXY
     // Need to compute: (1 + rate)^periods
 
     // Push 1.0, then add to rate
-    memcpy(stackRegs[2], @ext_one, t_extended)  // Push 1.0
-    memcpy(stackRegs[3], stackRegs[1], t_extended)  // Copy rate
+    memcpy(stackRegs[2], @mbf_one, MBF_SIZE)  // Push 1.0
+    memcpy(stackRegs[3], stackRegs[1], MBF_SIZE)  // Copy rate
     stackRegs[0], stackRegs[1], stackRegs[2], stackRegs[3] = stackRegs[2], stackRegs[3], stackRegs[0], stackRegs[1]
 
     // Stack now: rate, 1.0, periods, (old)
@@ -1490,7 +1816,7 @@ def annuityXY
     // Need: (1 - (1+rate)^-periods) / rate
 
     // Save rate for later division
-    memcpy(stackRegs[2], stackRegs[1], t_extended)  // Copy rate to stack[2]
+    memcpy(stackRegs[2], stackRegs[1], MBF_SIZE)  // Copy rate to stack[2]
 
     // Negate periods: -periods
     err = neg
@@ -1503,7 +1829,7 @@ def annuityXY
 
     // Stack now: -periods, rate, rate, ...
     // Compute (1 + rate)
-    memcpy(stackRegs[3], @ext_one, t_extended)  // Push 1.0
+    memcpy(stackRegs[3], @mbf_one, MBF_SIZE)  // Push 1.0
     stackRegs[0], stackRegs[1], stackRegs[2], stackRegs[3] = stackRegs[3], stackRegs[1], stackRegs[0], stackRegs[2]
     // Stack: 1.0, rate, -periods, rate
 
@@ -1528,7 +1854,7 @@ def annuityXY
 
     // Stack: (1+rate)^-periods, rate, ...
     // Compute 1 - (1+rate)^-periods
-    memcpy(stackRegs[2], @ext_one, t_extended)
+    memcpy(stackRegs[2], @mbf_one, MBF_SIZE)
     stackRegs[0], stackRegs[1], stackRegs[2] = stackRegs[2], stackRegs[0], stackRegs[1]
     // Stack: 1.0, (1+rate)^-periods, rate, ...
 
@@ -1628,12 +1954,24 @@ def reset
         puts("Using SANE software floating point\n")
     fin
 
-    // Initialize stack registers
+    // Initialize stack registers (MBF format)
     for i = 0 to 3
-        stackRegs[i] = @stack[i * t_extended]
-        sane:op2FP(FFINT|FOZ2X, stackRegs[i], @zero)
-        loadInt(@zero, i)
+        stackRegs[i] = @stack[i * MBF_SIZE]
+        // Initialize to zero (MBF format: exp=0 means zero)
+        stackRegs[i]->0 = 0
+        stackRegs[i]->1 = 0
+        stackRegs[i]->2 = 0
+        stackRegs[i]->3 = 0
+        stackRegs[i]->4 = 0
+        stackRegs[i]->5 = 0
+        stackRegs[i]->6 = 0
     next
+
+    // Initialize MBF constants by converting from Extended
+    extendedToMBF(@ext_one, @mbf_one)
+    extendedToMBF(@ext_two, @mbf_two)
+    extendedToMBF(@ext_negOne, @mbf_negOne)
+    extendedToMBF(@ext_ln2, @mbf_ln2)
 
     finalResult = sane:restoreZP(0)
 
