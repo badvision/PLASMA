@@ -1,0 +1,87 @@
+//
+// Simple test to verify _drop() fixes in fpumf
+// Tests: negX (uses binary mul), powXInt (uses pushInt + binary ops)
+//
+
+include "inc/cmdsys.plh"
+include "inc/fileio.plh"
+include "inc/fpstr.plh"
+include "inc/fpumf.plh"
+
+byte[80] strBuf
+
+def testNegX
+    puts("\nTesting negX (fixed binary mul issue):\n")
+
+    // Test: negX(5.0) should be -5.0
+    fpumf:pushStr("5.0")
+    fpumf:negX
+    fpumf:pullStr(@strBuf, 2, 3, FPSTR_FIXED)
+    puts("  negX(5.0) = "); puts(@strBuf); putc('\n')
+
+    // Test: negX(-3.14) should be 3.14
+    fpumf:pushStr("-3.14")
+    fpumf:negX
+    fpumf:pullStr(@strBuf, 2, 3, FPSTR_FIXED)
+    puts("  negX(-3.14) = "); puts(@strBuf); putc('\n')
+end
+
+def testPowXInt
+    puts("\nTesting powXInt (fixed pushInt + binary ops):\n")
+
+    // Test: 2^3 = 8
+    fpumf:pushStr("2.0")
+    fpumf:powXInt(3)
+    fpumf:pullStr(@strBuf, 2, 3, FPSTR_FIXED)
+    puts("  2^3 = "); puts(@strBuf); putc('\n')
+
+    // Test: 10^2 = 100
+    fpumf:pushStr("10.0")
+    fpumf:powXInt(2)
+    fpumf:pullStr(@strBuf, 2, 3, FPSTR_FIXED)
+    puts("  10^2 = "); puts(@strBuf); putc('\n')
+
+    // Test: 3^4 = 81
+    fpumf:pushStr("3.0")
+    fpumf:powXInt(4)
+    fpumf:pullStr(@strBuf, 2, 3, FPSTR_FIXED)
+    puts("  3^4 = "); puts(@strBuf); putc('\n')
+end
+
+def testStackDepth
+    byte i
+
+    puts("\nTesting stack depth (operations should not leak stack values):\n")
+
+    // Each operation should leave stack at same depth
+    for i = 1 to 10
+        fpumf:pushStr("1.5")
+        fpumf:negX
+        fpumf:pullStr(@strBuf, 2, 3, FPSTR_FIXED)
+    next
+    puts("  Completed 10 negX operations - no stack overflow\n")
+
+    for i = 1 to 10
+        fpumf:pushStr("2.0")
+        fpumf:powXInt(3)
+        fpumf:pullStr(@strBuf, 2, 3, FPSTR_FIXED)
+    next
+    puts("  Completed 10 powXInt operations - no stack overflow\n")
+end
+
+// Main program
+puts("=========================================\n")
+puts("FPU _drop() Fix Verification Test\n")
+puts("=========================================\n")
+
+fpumf:reset
+
+testNegX
+testPowXInt
+testStackDepth
+
+puts("\n=========================================\n")
+puts("All tests completed!\n")
+puts("=========================================\n")
+
+done

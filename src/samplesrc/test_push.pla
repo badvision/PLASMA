@@ -1,0 +1,63 @@
+//
+// Test if pushStr actually writes to stackRegs
+//
+include "inc/cmdsys.plh"
+include "inc/fpumf.plh"
+
+byte[7] buf0
+byte[7] buf1
+
+def main#0
+    puts("\n=== Push Test ===\n")
+
+    fpumf:reset()
+
+    puts("\n1. After reset, before any push:\n")
+    fpumf:storMBF(@buf0, 0)
+    fpumf:storMBF(@buf1, 1)
+    puts("  [0]: ")
+    puth(buf0.0)
+    puts(" ")
+    puth(buf0.5)
+    puts(" [1]: ")
+    puth(buf1.0)
+    puts(" ")
+    puth(buf1.5)
+    putln
+
+    puts("\n2. After pushStr(10.0):\n")
+    fpumf:pushStr("10.0")
+    fpumf:storMBF(@buf0, 0)
+    fpumf:storMBF(@buf1, 1)
+    puts("  [0]: ")
+    puth(buf0.0)
+    puts(" ")
+    puth(buf0.5)
+    puts(" [1]: ")
+    puth(buf1.0)
+    puts(" ")
+    puth(buf1.5)
+    putln
+
+    puts("\n3. After pushStr(5.0):\n")
+    fpumf:pushStr("5.0")
+    fpumf:storMBF(@buf0, 0)
+    fpumf:storMBF(@buf1, 1)
+    puts("  [0]: ")
+    puth(buf0.0)
+    puts(" ")
+    puth(buf0.5)
+    puts(" [1]: ")
+    puth(buf1.0)
+    puts(" ")
+    puth(buf1.5)
+    putln
+
+    puts("\n4. Now call sub():\n")
+    fpumf:sub()
+
+    puts("Done.\n")
+end
+
+main
+done

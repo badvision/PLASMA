@@ -1,0 +1,416 @@
+//
+// Mandelbrot Set Renderer - Core Rendering Engine (Agent 1)
+// Double Hi-Res Graphics (560x192 resolution)
+//
+include "inc/cmdsys.plh"
+include "inc/fpu.plh"
+include "inc/dgrlib.plh"
+
+sysflags restxt1|restxt2|resxtxt1|resxtxt2
+
+//
+// Settings structure
+//
+struc t_mandel_settings
+  byte[10] real_min
+  byte[10] real_max
+  byte[10] imag_min
+  byte[10] imag_max
+  word max_iter
+end
+
+//
+// Screen dimensions
+//
+const SCREEN_WIDTH  = 560
+const SCREEN_HEIGHT = 192
+
+//
+// Global settings
+//
+byte[t_mandel_settings] settings
+
+//
+// FPU working registers for complex arithmetic
+//
+byte c_real[10]
+byte c_imag[10]
+byte z_real[10]
+byte z_imag[10]
+byte z_real_sq[10]
+byte z_imag_sq[10]
+byte magnitude_sq[10]
+byte real_range[10]
+byte imag_range[10]
+byte temp_fp[10]
+
+//
+// Initialize default settings
+// Default view: real [-2.5, 1.0], imag [-1.0, 1.0]
+//
+def initSettings#0
+  // Set real_min = -2.5
+  fpu:pushStr("-2.5")
+  fpu:pullExt(@settings.real_min)
+
+  // Set real_max = 1.0
+  fpu:pushStr("1.0")
+  fpu:pullExt(@settings.real_max)
+
+  // Set imag_min = -1.0
+  fpu:pushStr("-1.0")
+  fpu:pullExt(@settings.imag_min)
+
+  // Set imag_max = 1.0
+  fpu:pushStr("1.0")
+  fpu:pullExt(@settings.imag_max)
+
+  // Set max iterations (16 for fast testing)
+  settings:max_iter = 16
+
+  // Calculate ranges for coordinate mapping
+  // real_range = real_max - real_min
+  fpu:pushExt(@settings.real_max)
+  fpu:pushExt(@settings.real_min)
+  fpu:subXY()
+  fpu:pullExt(@real_range)
+
+  // imag_range = imag_max - imag_min
+  fpu:pushExt(@settings.imag_max)
+  fpu:pushExt(@settings.imag_min)
+  fpu:subXY()
+  fpu:pullExt(@imag_range)
+end
+
+//
+// Map screen X coordinate to complex plane real value
+// Input: screen_x (word on stack)
+// Output: Stores result in c_real
+//
+def screenToReal(screen_x)#0
+  // c_real = real_min + (screen_x / SCREEN_WIDTH) * real_range
+
+  // Push screen_x and convert to FP
+  fpu:pushInt(screen_x)
+
+  // Push SCREEN_WIDTH and convert to FP
+  fpu:pushInt(SCREEN_WIDTH)
+
+  // Divide: screen_x / SCREEN_WIDTH
+  fpu:divXY()
+
+  // Multiply by real_range
+  fpu:pushExt(@real_range)
+  fpu:mulXY()
+
+  // Add real_min
+  fpu:pushExt(@settings.real_min)
+  fpu:addXY()
+
+  // Store in c_real
+  fpu:pullExt(@c_real)
+end
+
+//
+// Map screen Y coordinate to complex plane imaginary value
+// Input: screen_y (word on stack)
+// Output: Stores result in c_imag
+//
+def screenToImag(screen_y)#0
+  // c_imag = imag_min + (screen_y / SCREEN_HEIGHT) * imag_range
+
+  // Push screen_y and convert to FP
+  fpu:pushInt(screen_y)
+
+  // Push SCREEN_HEIGHT and convert to FP
+  fpu:pushInt(SCREEN_HEIGHT)
+
+  // Divide: screen_y / SCREEN_HEIGHT
+  fpu:divXY()
+
+  // Multiply by imag_range
+  fpu:pushExt(@imag_range)
+  fpu:mulXY()
+
+  // Add imag_min
+  fpu:pushExt(@settings.imag_min)
+  fpu:addXY()
+
+  // Store in c_imag
+  fpu:pullExt(@c_imag)
+end
+
+//
+// Calculate Mandelbrot iteration count for a given complex point
+// Input: c_real and c_imag are already set, x and y for visual feedback
+// Output: Returns iteration count (0 = in set, >0 = escaped)
+//
+def mandelbrotIterate(x, y)#1
+  word iter
+  word escaped
+
+  // Initialize z = 0 + 0i
+  fpu:pushInt(0)
+  fpu:pullExt(@z_real)
+  fpu:pushInt(0)
+  fpu:pullExt(@z_imag)
+
+  iter = 0
+  escaped = FALSE
+
+  // Iteration loop
+  while iter < settings:max_iter and not escaped
+    // Flash black/white each iteration for visual feedback
+    if (iter & 1) == 0
+      dgrColor(0)  // Black
+    else
+      dgrColor(15) // White
+    fin
+    dgrPlot(x, y)
+    // Calculate z_real_sq = z_real * z_real
+    fpu:pushExt(@z_real)
+    fpu:dupX()
+    fpu:mulXY()
+    fpu:pullExt(@z_real_sq)
+
+    // Calculate z_imag_sq = z_imag * z_imag
+    fpu:pushExt(@z_imag)
+    fpu:dupX()
+    fpu:mulXY()
+    fpu:pullExt(@z_imag_sq)
+
+    // Check for escape: magnitude_sq = z_real_sq + z_imag_sq
+    fpu:pushExt(@z_real_sq)
+    fpu:pushExt(@z_imag_sq)
+    fpu:addXY()
+    fpu:pullExt(@magnitude_sq)
+
+    // Compare magnitude_sq with 4.0
+    fpu:pushExt(@magnitude_sq)
+    fpu:pushStr("4.0")
+    if fpu:cmpXY() == FPUCMPGT
+      escaped = TRUE
+    else
+      // Calculate new z_imag = 2 * z_real * z_imag + c_imag
+      fpu:pushStr("2.0")
+      fpu:pushExt(@z_real)
+      fpu:mulXY()
+      fpu:pushExt(@z_imag)
+      fpu:mulXY()
+      fpu:pushExt(@c_imag)
+      fpu:addXY()
+      fpu:pullExt(@temp_fp)
+
+      // Calculate new z_real = z_real_sq - z_imag_sq + c_real
+      fpu:pushExt(@z_real_sq)
+      fpu:pushExt(@z_imag_sq)
+      fpu:subXY()
+      fpu:pushExt(@c_real)
+      fpu:addXY()
+      fpu:pullExt(@z_real)
+
+      // Move temp to z_imag
+      fpu:pushExt(@temp_fp)
+      fpu:pullExt(@z_imag)
+
+      iter++
+    fin
+  loop
+
+  // Return iteration count (0 if in set, iter if escaped)
+  if escaped
+    return iter
+  else
+    return 0
+  fin
+end
+
+//
+// Map iteration count to color
+// Color formula: color = (iterations mod 15) + 1 for escaped points
+//                color = 0 for points in the set
+//
+def iterToColor(iter)#1
+  if iter == 0
+    return 0
+  else
+    return (iter % 15) + 1
+  fin
+end
+
+//
+// Render a single pixel at screen coordinates
+//
+def renderPixel(x, y)#0
+  word iter
+  byte color
+
+  // Map screen coordinates to complex plane
+  screenToReal(x)
+  screenToImag(y)
+
+  // Calculate iteration count (pass x,y for visual feedback)
+  iter = mandelbrotIterate(x, y)
+
+  // Map to color
+  color = iterToColor(iter)
+
+  // Plot final pixel color
+  dgrColor(color)
+  dgrPlot(x, y)
+end
+
+//
+// Test coordinate mapping at key screen positions
+//
+def testCoordinates#0
+  byte[80] str_buffer
+
+  puts("=== COORDINATE MAPPING TEST ===\n")
+  putln
+
+  puts("Expected mapping:\n")
+  puts("  Top-left (0, 0) -> real=-2.5, imag=-1.0\n")
+  puts("  Top-right (559, 0) -> real=1.0, imag=-1.0\n")
+  puts("  Bottom-left (0, 191) -> real=-2.5, imag=1.0\n")
+  puts("  Bottom-right (559, 191) -> real=1.0, imag=1.0\n")
+  putln
+
+  puts("Actual mapping:\n")
+
+  // Test (0, 0) - top-left
+  puts("Pixel (0, 0):\n")
+  screenToReal(0)
+  puts("  c_real = ")
+  fpu:pushExt(@c_real)
+  fpu:pullStr(@str_buffer, 3, 6, 0)
+  puts(@str_buffer)
+  putln
+  screenToImag(0)
+  puts("  c_imag = ")
+  fpu:pushExt(@c_imag)
+  fpu:pullStr(@str_buffer, 3, 6, 0)
+  puts(@str_buffer)
+  putln
+  putln
+
+  // Test (559, 0) - top-right
+  puts("Pixel (559, 0):\n")
+  screenToReal(559)
+  puts("  c_real = ")
+  fpu:pushExt(@c_real)
+  fpu:pullStr(@str_buffer, 3, 6, 0)
+  puts(@str_buffer)
+  putln
+  screenToImag(0)
+  puts("  c_imag = ")
+  fpu:pushExt(@c_imag)
+  fpu:pullStr(@str_buffer, 3, 6, 0)
+  puts(@str_buffer)
+  putln
+  putln
+
+  // Test (0, 191) - bottom-left
+  puts("Pixel (0, 191):\n")
+  screenToReal(0)
+  puts("  c_real = ")
+  fpu:pushExt(@c_real)
+  fpu:pullStr(@str_buffer, 3, 6, 0)
+  puts(@str_buffer)
+  putln
+  screenToImag(191)
+  puts("  c_imag = ")
+  fpu:pushExt(@c_imag)
+  fpu:pullStr(@str_buffer, 3, 6, 0)
+  puts(@str_buffer)
+  putln
+  putln
+
+  // Test (559, 191) - bottom-right
+  puts("Pixel (559, 191):\n")
+  screenToReal(559)
+  puts("  c_real = ")
+  fpu:pushExt(@c_real)
+  fpu:pullStr(@str_buffer, 3, 6, 0)
+  puts(@str_buffer)
+  putln
+  screenToImag(191)
+  puts("  c_imag = ")
+  fpu:pushExt(@c_imag)
+  fpu:pullStr(@str_buffer, 3, 6, 0)
+  puts(@str_buffer)
+  putln
+  putln
+
+  // Test center pixel
+  puts("Pixel (280, 96) - center:\n")
+  screenToReal(280)
+  puts("  c_real = ")
+  fpu:pushExt(@c_real)
+  fpu:pullStr(@str_buffer, 3, 6, 0)
+  puts(@str_buffer)
+  putln
+  screenToImag(96)
+  puts("  c_imag = ")
+  fpu:pushExt(@c_imag)
+  fpu:pullStr(@str_buffer, 3, 6, 0)
+  puts(@str_buffer)
+  putln
+  putln
+
+  puts("Press any key to continue to render...\n")
+  conio:getkey()
+end
+
+//
+// Render the full Mandelbrot set
+//
+def renderMandelbrot#0
+  word x, y
+
+  // Initialize graphics
+  dgrMode(dgrPage1)
+  dgrDrawBuf(dgrPage1)
+  dgrClear(0)
+
+  puts("Rendering Mandelbrot set...\n")
+  puts("(This will take several minutes)\n")
+
+  // Render each pixel
+  for y = 0 to SCREEN_HEIGHT - 1
+    for x = 0 to SCREEN_WIDTH - 1
+      renderPixel(x, y)
+    next
+  next
+
+  puts("Render complete!\n")
+end
+
+//
+// Main program
+//
+def main#0
+  // Initialize FPU
+  fpu:reset()
+
+  // Initialize settings with default view
+  initSettings
+
+  // Test coordinate mapping before rendering
+  testCoordinates
+
+  // Render the Mandelbrot set
+  renderMandelbrot
+
+  // Wait for keypress
+  conio:getkey()
+
+  // Restore text mode
+  dgrMode(dgrOff)
+end
+
+//
+// Entry point
+//
+main
+done

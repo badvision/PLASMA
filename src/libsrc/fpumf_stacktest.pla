@@ -1,0 +1,192 @@
+//
+// Stack Diagnostic Test for MegaFlash FPU
+//
+// This file tests if the 6502 hardware stack (S register)
+// is being corrupted by MegaFlash I/O operations
+//
+
+include "inc/cmdsys.plh"
+
+//
+// Test 1: Check if 6502 stack pointer is preserved across MegaFlash writes
+//
+asm testStackPreservation()#1
+    !SOURCE "vmsrc/apple/plvmzp.inc"
+    !SOURCE "vmsrc/apple/megaflash.inc"
+
+    // Save current 6502 stack pointer
+    TSX
+    TXA
+    PHA                 // Save S on stack
+
+    // Write to MegaFlash registers
+    STZ     MF_CMDREG
+    LDA     #$30
+    STA     MF_CMDREG
+
+    // Read 6502 stack pointer again
+    TSX
+    TAY                 // Y = current S
+
+    // Pop saved S value
+    PLA                 // A = saved S
+
+    // Compare: Are they the same?
+    TYA
+    SEC
+    SBC     #1          // Account for the PLA we just did
+    CMP     ESTKL,X     // Compare with saved value (still on CPU stack)
+    BEQ     +
+
+    // Stack pointer changed!
+    LDA     #1          // Return error code 1
+    STA     ESTKL,X
+    LDA     #0
+    STA     ESTKH,X
+    RTS
+
++   // Stack pointer preserved
+    LDA     #0          // Return success
+    STA     ESTKL,X
+    STA     ESTKH,X
+    RTS
+end
+
+//
+// Test 2: Check if PHA/PLA are balanced
+//
+asm testPushPopBalance()#1
+    !SOURCE "vmsrc/apple/plvmzp.inc"
+
+    // Save ESP
+    STX     $10
+
+    // Get current 6502 S
+    TSX
+    STX     $11         // Save to $11
+
+    // Do some PHA/PLA operations
+    LDA     #$42
+    PHA
+    LDA     #$43
+    PHA
+    PLA
+    PLA
+
+    // Check if S is restored
+    TSX
+    TXA
+    CMP     $11
+    BEQ     +
+
+    // Unbalanced!
+    LDX     $10         // Restore ESP
+    LDA     #1
+    STA     ESTKL,X
+    LDA     #0
+    STA     ESTKH,X
+    RTS
+
++   // Balanced
+    LDX     $10
+    LDA     #0
+    STA     ESTKL,X
+    STA     ESTKH,X
+    RTS
+end
+
+//
+// Test 3: Verify execMegaFlash doesn't corrupt caller's stack
+//
+asm testExecMegaFlashStack()#1
+    !SOURCE "vmsrc/apple/plvmzp.inc"
+
+    // Save ESP
+    STX     $10
+
+    // Save 6502 S pointer BEFORE call
+    TSX
+    STX     $11
+
+    // Push a marker value on 6502 stack
+    LDA     #$AA
+    PHA
+
+    // Now simulate what would happen if we called execMegaFlash
+    // (We won't actually call it, just check the stack after writing to MegaFlash)
+    STZ     $C0C0       // Write to MF_CMDREG like execMegaFlash does
+
+    // Check if our marker is still there
+    PLA
+    CMP     #$AA
+    BEQ     +
+
+    // Marker corrupted!
+    LDX     $10
+    LDA     #1
+    STA     ESTKL,X
+    LDA     #0
+    STA     ESTKH,X
+    RTS
+
++   // Check if S pointer is back to original value
+    TSX
+    TXA
+    CMP     $11
+    BEQ     ++
+
+    // S pointer changed!
+    LDX     $10
+    LDA     #2
+    STA     ESTKL,X
+    LDA     #0
+    STA     ESTKH,X
+    RTS
+
+++  // All good
+    LDX     $10
+    LDA     #0
+    STA     ESTKL,X
+    STA     ESTKH,X
+    RTS
+end
+
+//
+// Main test program
+//
+def main()
+    byte result
+
+    puts("MegaFlash Stack Diagnostic Test\n")
+    puts("================================\n\n")
+
+    puts("Test 1: Stack preservation across MegaFlash writes\n")
+    result = testStackPreservation()
+    if result
+        puts("  FAILED: 6502 stack pointer changed!\n")
+    else
+        puts("  PASSED\n")
+    fin
+
+    puts("\nTest 2: PHA/PLA balance\n")
+    result = testPushPopBalance()
+    if result
+        puts("  FAILED: Stack unbalanced!\n")
+    else
+        puts("  PASSED\n")
+    fin
+
+    puts("\nTest 3: execMegaFlash stack safety\n")
+    result = testExecMegaFlashStack()
+    if result == 1
+        puts("  FAILED: Stack marker corrupted!\n")
+    elsif result == 2
+        puts("  FAILED: Stack pointer changed!\n")
+    else
+        puts("  PASSED\n")
+    fin
+
+    puts("\nAll tests complete.\n")
+end
+
+main()

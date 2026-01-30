@@ -1,0 +1,259 @@
+//
+// SAFER TRACE IMPLEMENTATION FOR execMegaFlash
+//
+// ANALYSIS OF THE PROBLEM:
+// =========================
+//
+// Output: "3456" then "FDEF" then crash
+// Expected: "3456ABCDEF"
+// Got: "3456FDEF" (letters F, D, E, F - F appears TWICE, A/B/C missing)
+//
+// HYPOTHESIS:
+// -----------
+// The JSR $FDED (COUT) call is corrupting something critical:
+//
+// 1. $FDED is Monitor COUT routine
+// 2. It MAY modify: A, X, Y, and flags
+// 3. It MAY affect: Zero page locations
+// 4. Most critically: ESP (PLASMA stack pointer) could be corrupted
+//
+// SAFER TRACE APPROACH:
+// =====================
+// Instead of calling COUT (which requires ROM routines), write to a memory buffer
+// that can be examined after the crash
+//
+
+asm execMegaFlashSafeTrace(cmd)#1
+    !SOURCE "vmsrc/apple/plvmzp.inc"
+    !SOURCE "vmsrc/apple/megaflash.inc"
+
+    // USE MEMORY-BASED TRACING INSTEAD OF COUT
+    // Trace buffer at fixed location: $0380-$03FF (text page 1 hole)
+    TRACE_BUF = $0380
+    TRACE_IDX = $037F    // Current trace index
+
+    LDX     ESP
+    LDA     ESTKL,X             // Get command code
+
+    // Save command to safe place
+    PHA
+
+    // Trace A: Store 'A' to trace buffer
+    LDY     TRACE_IDX
+    LDA     #'A'
+    STA     TRACE_BUF,Y
+    INY
+    STY     TRACE_IDX
+
+    // Restore command
+    PLA
+    PHA                         // Save again for next trace
+
+    // Reset buffer pointers
+    STZ     MF_CMDREG
+
+    // Trace B: Store 'B' to trace buffer
+    LDY     TRACE_IDX
+    LDA     #'B'
+    STA     TRACE_BUF,Y
+    INY
+    STY     TRACE_IDX
+
+    // Restore command
+    PLA
+    PHA                         // Save again
+
+    // Send command
+    STA     MF_CMDREG
+
+    // Trace C: Store 'C' to trace buffer
+    LDY     TRACE_IDX
+    LDA     #'C'
+    STA     TRACE_BUF,Y
+    INY
+    STY     TRACE_IDX
+
+    // Restore command (no longer needed but keep stack balanced)
+    PLA
+
+    // Wait for completion with timeout
+    LDY     #$00
+    LDX     #$00
+
+-   BIT     MF_STATUSREG
+    BPL     +               // Exit if BUSY cleared (bit 7 = 0)
+
+    // Decrement timeout counter
+    DEY
+    BNE     -
+    DEX
+    BNE     -
+
+    // Timeout - return error code 1
+    // Trace T: Timeout occurred
+    LDY     TRACE_IDX
+    LDA     #'T'
+    STA     TRACE_BUF,Y
+    INY
+    STY     TRACE_IDX
+
+    LDX     ESP
+    LDA     #$01
+    STA     ESTKL,X
+    LDA     #$00
+    STA     ESTKH,X
+    RTS
+
++   // Success - get hardware error code from parameter register
+    // Trace D: Wait loop completed
+    LDY     TRACE_IDX
+    LDA     #'D'
+    STA     TRACE_BUF,Y
+    INY
+    STY     TRACE_IDX
+
+    LDX     ESP
+    LDA     MF_PARAMREG
+    STA     ESTKL,X
+
+    // Trace E: After reading parameter
+    LDY     TRACE_IDX
+    LDA     #'E'
+    STA     TRACE_BUF,Y
+    INY
+    STY     TRACE_IDX
+
+    LDX     ESP
+    LDA     #0
+    STA     ESTKH,X
+
+    // Trace F: Before RTS
+    LDY     TRACE_IDX
+    LDA     #'F'
+    STA     TRACE_BUF,Y
+    INY
+    STY     TRACE_IDX
+
+    RTS
+end
+
+//
+// Helper function to initialize trace buffer
+//
+asm initTraceBuffer
+    TRACE_IDX = $037F
+
+    LDA     #0
+    STA     TRACE_IDX
+    RTS
+end
+
+//
+// Helper function to dump trace buffer to screen
+//
+asm dumpTraceBuffer
+    TRACE_BUF = $0380
+    TRACE_IDX = $037F
+
+    LDY     #0
+-   CPY     TRACE_IDX
+    BCS     +               // Done if Y >= TRACE_IDX
+
+    LDA     TRACE_BUF,Y
+    JSR     $FDED          // Now safe to call COUT
+    INY
+    BMP     -
+
++   RTS
+end
+
+//
+// ALTERNATIVE: Even safer - use zero page memory that won't interfere
+//
+asm execMegaFlashZPTrace(cmd)#1
+    !SOURCE "vmsrc/apple/plvmzp.inc"
+    !SOURCE "vmsrc/apple/megaflash.inc"
+
+    // Use ZP locations we KNOW are safe (not used by PLASMA VM or ROM)
+    // $F0-$FF are typically safe scratch space
+    TRACE_A = $F0
+    TRACE_B = $F1
+    TRACE_C = $F2
+    TRACE_D = $F3
+    TRACE_E = $F4
+    TRACE_F = $F5
+
+    LDX     ESP
+    LDA     ESTKL,X             // Get command code
+
+    // Trace A
+    LDA     #'A'
+    STA     TRACE_A
+
+    LDX     ESP
+    LDA     ESTKL,X             // Get command again
+
+    // Reset buffer pointers
+    STZ     MF_CMDREG
+
+    // Trace B
+    LDA     #'B'
+    STA     TRACE_B
+
+    LDX     ESP
+    LDA     ESTKL,X             // Get command again
+
+    // Send command
+    STA     MF_CMDREG
+
+    // Trace C
+    LDA     #'C'
+    STA     TRACE_C
+
+    // Wait for completion with timeout
+    LDY     #$00
+    LDX     #$00
+
+-   BIT     MF_STATUSREG
+    BPL     +               // Exit if BUSY cleared (bit 7 = 0)
+
+    // Decrement timeout counter
+    DEY
+    BNE     -
+    DEX
+    BNE     -
+
+    // Timeout
+    LDA     #'T'
+    STA     TRACE_D
+
+    LDX     ESP
+    LDA     #$01
+    STA     ESTKL,X
+    LDA     #$00
+    STA     ESTKH,X
+    RTS
+
++   // Success
+    // Trace D
+    LDA     #'D'
+    STA     TRACE_D
+
+    LDX     ESP
+    LDA     MF_PARAMREG
+    STA     ESTKL,X
+
+    // Trace E
+    LDA     #'E'
+    STA     TRACE_E
+
+    LDX     ESP
+    LDA     #0
+    STA     ESTKH,X
+
+    // Trace F
+    LDA     #'F'
+    STA     TRACE_F
+
+    RTS
+end

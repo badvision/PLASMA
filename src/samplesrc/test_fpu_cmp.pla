@@ -1,0 +1,95 @@
+//
+// Test FPU comparison result values
+// This will help us understand what SANE actually returns
+//
+include "inc/cmdsys.plh"
+include "inc/fpu.plh"
+include "inc/conio.plh"
+
+def main#0
+  word cmpResult
+  byte[20] strBuf
+
+  // Initialize FPU
+  fpu:reset()
+
+  puts("=== SANE FPU COMPARISON TEST ===\n\n")
+
+  // Test 1: 0 < 4.0 (should return FPUCMPLT = 0x8080)
+  puts("Test 1: Compare 0 vs 4.0\n")
+  fpu:pushStr("0.0")
+  fpu:pushStr("4.0")
+  cmpResult = fpu:cmpXY()
+  puts("  Result = ")
+  puti(cmpResult)
+  puts(" (hex: ")
+  puth(cmpResult)
+  puts(")\n")
+  puts("  Expected FPUCMPLT = ")
+  puti(FPUCMPLT)
+  puts(" (hex: ")
+  puth(FPUCMPLT)
+  puts(")\n")
+  if cmpResult == FPUCMPLT
+    puts("  => CORRECT: 0 < 4.0\n")
+  elsif cmpResult == FPUCMPGT
+    puts("  => WRONG: Says 0 > 4.0\n")
+  elsif cmpResult == FPUCMPEQ
+    puts("  => WRONG: Says 0 == 4.0\n")
+  fin
+  putln
+
+  // Test 2: 4.0 > 0 (should return FPUCMPGT = 0x4040)
+  puts("Test 2: Compare 4.0 vs 0.0\n")
+  fpu:pushStr("4.0")
+  fpu:pushStr("0.0")
+  cmpResult = fpu:cmpXY()
+  puts("  Result = ")
+  puti(cmpResult)
+  puts(" (hex: ")
+  puth(cmpResult)
+  puts(")\n")
+  puts("  Expected FPUCMPGT = ")
+  puti(FPUCMPGT)
+  puts(" (hex: ")
+  puth(FPUCMPGT)
+  puts(")\n")
+  if cmpResult == FPUCMPGT
+    puts("  => CORRECT: 4.0 > 0\n")
+  elsif cmpResult == FPUCMPLT
+    puts("  => WRONG: Says 4.0 < 0\n")
+  elsif cmpResult == FPUCMPEQ
+    puts("  => WRONG: Says 4.0 == 0\n")
+  fin
+  putln
+
+  // Test 3: 2.5 == 2.5 (should return FPUCMPEQ = 0x0002)
+  puts("Test 3: Compare 2.5 vs 2.5\n")
+  fpu:pushStr("2.5")
+  fpu:pushStr("2.5")
+  cmpResult = fpu:cmpXY()
+  puts("  Result = ")
+  puti(cmpResult)
+  puts(" (hex: ")
+  puth(cmpResult)
+  puts(")\n")
+  puts("  Expected FPUCMPEQ = ")
+  puti(FPUCMPEQ)
+  puts(" (hex: ")
+  puth(FPUCMPEQ)
+  puts(")\n")
+  if cmpResult == FPUCMPEQ
+    puts("  => CORRECT: 2.5 == 2.5\n")
+  elsif cmpResult == FPUCMPGT
+    puts("  => WRONG: Says 2.5 > 2.5\n")
+  elsif cmpResult == FPUCMPLT
+    puts("  => WRONG: Says 2.5 < 2.5\n")
+  fin
+  putln
+
+  puts("Press any key...\n")
+  conio:getkey()
+end
+
+main
+done

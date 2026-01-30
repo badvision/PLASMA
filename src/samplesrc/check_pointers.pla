@@ -1,0 +1,70 @@
+//
+// Check if stackRegs pointer array is getting corrupted
+//
+include "inc/cmdsys.plh"
+include "inc/fpumf.plh"
+
+// Access the stackRegs array directly
+// It's defined in fpumf.pla as: word stackRegs[4]
+// We need to import it or access it via fpumf module
+predef showStackRegs
+
+def showStackRegs#0
+    word ptr0, ptr1, ptr2, ptr3
+
+    // We can't directly access fpumf's stackRegs from here,
+    // but we can use storMBF to see if data is accessible
+    // and print diagnostic info
+
+    puts("Checking stack state...\n")
+end
+
+def main#0
+    byte[7] buf0
+    byte[7] buf1
+    word result
+
+    fpumf:reset()
+
+    puts("\n=== Pointer Check Test ===\n")
+
+    puts("\n1. After reset - try storMBF:\n")
+    fpumf:storMBF(@buf0, 0)
+    fpumf:storMBF(@buf1, 1)
+    puts("  [0]: ")
+    puth(buf0.0)
+    puts(" ")
+    puth(buf0.5)
+    puts(" [1]: ")
+    puth(buf1.0)
+    puts(" ")
+    puth(buf1.5)
+    putln
+
+    puts("\n2. Push 6.0, 6.0:\n")
+    fpumf:pushStr("6.0")
+    fpumf:pushStr("6.0")
+
+    fpumf:storMBF(@buf0, 0)
+    fpumf:storMBF(@buf1, 1)
+    puts("  [0]: ")
+    puth(buf0.0)
+    puts(" ")
+    puth(buf0.5)
+    puts(" [1]: ")
+    puth(buf1.0)
+    puts(" ")
+    puth(buf1.5)
+    putln
+
+    puts("\n3. Call cmp():\n")
+    result = fpumf:cmp()
+    puts("  Result: ")
+    puth(result)
+    putln
+
+    puts("\nDone.\n")
+end
+
+main
+done

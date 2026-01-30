@@ -81,15 +81,15 @@ struc t_fpu
     word dupX
     word swapXY
     word clearX
-    word addXY
-    word subXY
-    word mulXY
-    word divXY
-    word remXY
+    word add
+    word sub
+    word mul
+    word div
+    word rem
     word negX
     word absX
     word typeX
-    word cmpXY
+    word cmp
     word logbX
     word scalebXInt
     word truncX

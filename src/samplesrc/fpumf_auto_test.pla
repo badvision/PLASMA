@@ -1,0 +1,89 @@
+//
+// Automated MegaFlash FPU Test - Simple version
+// Outputs to console for plvm stdout capture
+//
+include "inc/cmdsys.plh"
+include "inc/fpumf.plh"
+
+def main#0
+    word cmpResult
+    word passCount, failCount
+
+    passCount = 0
+    failCount = 0
+
+    puts("TEST_START\n")
+
+    // Initialize FPU
+    fpumf:reset()
+
+    // Test 1: 10.0 > 5.0 (expect FPUCMPGT = 0x4040)
+    puts("TEST cmp_gt_10_5 ")
+    fpumf:pushStr("10.0")
+    fpumf:pushStr("5.0")
+    cmpResult = fpumf:cmp()
+    if cmpResult == $4040
+        puts("PASS ")
+        passCount++
+    else
+        puts("FAIL ")
+        failCount++
+    fin
+    puth(cmpResult)
+    putln
+
+    // Test 2: 3.0 < 7.0 (expect FPUCMPLT = 0x8080)
+    puts("TEST cmp_lt_3_7 ")
+    fpumf:pushStr("3.0")
+    fpumf:pushStr("7.0")
+    cmpResult = fpumf:cmp()
+    if cmpResult == $8080
+        puts("PASS ")
+        passCount++
+    else
+        puts("FAIL ")
+        failCount++
+    fin
+    puth(cmpResult)
+    putln
+
+    // Test 3: 6.0 == 6.0 (expect FPUCMPEQ = 0x0002)
+    puts("TEST cmp_eq_6_6 ")
+    fpumf:pushStr("6.0")
+    fpumf:pushStr("6.0")
+    cmpResult = fpumf:cmp()
+    if cmpResult == $0002
+        puts("PASS ")
+        passCount++
+    else
+        puts("FAIL ")
+        failCount++
+    fin
+    puth(cmpResult)
+    putln
+
+    // Test 4: 25.0 > 4.0 (Mandelbrot escape)
+    puts("TEST mandelbrot_escape ")
+    fpumf:pushStr("25.0")
+    fpumf:pushStr("4.0")
+    cmpResult = fpumf:cmp()
+    if cmpResult == $4040
+        puts("PASS ")
+        passCount++
+    else
+        puts("FAIL ")
+        failCount++
+    fin
+    puth(cmpResult)
+    putln
+
+    // Summary
+    puts("TEST_END ")
+    puti(passCount)
+    puts(" ")
+    puti(failCount)
+    putln
+end
+
+main
+done

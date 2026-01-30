@@ -1,0 +1,385 @@
+//==============================================================================
+// Test Program for Mouse Zoom Integration
+// Agent 3 - Standalone Test
+//
+// This test program verifies mouse integration independently of the full
+// Mandelbrot renderer. It tests:
+// - Mouse detection
+// - Zoom box drawing with XOR
+// - Coordinate calculation (with mock screenToComplex)
+//==============================================================================
+
+include "inc/cmdsys.plh"
+include "inc/conio.plh"
+include "inc/mouse.plh"
+include "inc/dgrlib.plh"
+include "inc/fpu.plh"
+
+sysflags restxt1|restxt2|resxtxt1|resxtxt2    // Reserve all text pages
+
+//------------------------------------------------------------------------------
+// Settings Structure (Mock)
+//------------------------------------------------------------------------------
+struc t_settings
+    byte[10] realMin
+    byte[10] realMax
+    byte[10] imagMin
+    byte[10] imagMax
+end
+
+byte[t_settings] testSettings
+
+//------------------------------------------------------------------------------
+// Mouse state structure
+//------------------------------------------------------------------------------
+struc t_mouseState
+    byte hasMouseHardware
+    byte buttonDown
+    byte dragging
+    word startX
+    word startY
+    word currentX
+    word currentY
+    word lastX
+    word lastY
+end
+
+byte[t_mouseState] mouseState
+word mouseAPI = 0
+
+//------------------------------------------------------------------------------
+// Mock screenToComplex for testing
+// In real implementation, this comes from Agent 1
+//------------------------------------------------------------------------------
+def screenToComplex(px, py, pSettings, pReal, pImag)#0
+    // Mock implementation for testing
+    // Real: map 0-79 to -2.0 to 1.0
+    // Imag: map 0-47 to 1.0 to -1.0
+
+    // For testing, just store the pixel values scaled
+    // Real component
+    fpu:pushInt(px)
+    fpu:pushInt(79)
+    fpu:divXY()
+    fpu:pushInt(3)
+    fpu:mulXY()
+    fpu:pushInt(-2)
+    fpu:addXY()
+    fpu:storExt(pReal)
+
+    // Imaginary component
+    fpu:pushInt(1)
+    fpu:pushInt(py)
+    fpu:pushInt(47)
+    fpu:divXY()
+    fpu:pushInt(2)
+    fpu:mulXY()
+    fpu:subXY()
+    fpu:storExt(pImag)
+end
+
+//------------------------------------------------------------------------------
+// Detect Mouse
+//------------------------------------------------------------------------------
+def detectMouse#1
+    word mptr
+
+    mptr = syscall($7F, @"MOUSE")
+    if mptr
+        mouseAPI = mptr
+        mouseState:hasMouseHardware = TRUE
+        mouseAPI=>setMouse(MOUSE_ENABLE)
+        mouseAPI=>posMouse(40, 24)
+        mouseAPI=>clampMouse(0, 79, 0, 47)
+        return TRUE
+    else
+        mouseState:hasMouseHardware = FALSE
+        return FALSE
+    fin
+end
+
+//------------------------------------------------------------------------------
+// Poll Mouse
+//------------------------------------------------------------------------------
+def pollMouse#0
+    byte[3] mouseData
+    byte status
+    word mx, my
+
+    if not mouseState:hasMouseHardware
+        return
+    fin
+
+    status = mouseAPI=>readMouse(@mouseData)
+    mx = mouseData.0
+    my = mouseData.2
+
+    mouseState:currentX = mx
+    mouseState:currentY = my
+
+    if status & BUTTON_DOWN
+        if not mouseState:buttonDown
+            mouseState:buttonDown = TRUE
+            mouseState:dragging = TRUE
+            mouseState:startX = mx
+            mouseState:startY = my
+            mouseState:lastX = mx
+            mouseState:lastY = my
+        fin
+    else
+        if mouseState:buttonDown
+            mouseState:buttonDown = FALSE
+            mouseState:dragging = FALSE
+        fin
+    fin
+end
+
+//------------------------------------------------------------------------------
+// Draw Zoom Box
+//------------------------------------------------------------------------------
+def drawZoomBox(x1, y1, x2, y2)#0
+    word temp
+
+    if x1 > x2
+        temp = x1
+        x1 = x2
+        x2 = temp
+    fin
+    if y1 > y2
+        temp = y1
+        y1 = y2
+        y2 = temp
+    fin
+
+    dgrColor(15)
+    dgrHLin(x1, x2, y1)
+    dgrHLin(x1, x2, y2)
+    dgrVLin(y1, y2, x1)
+    dgrVLin(y1, y2, x2)
+end
+
+//------------------------------------------------------------------------------
+// Update Zoom Box
+//------------------------------------------------------------------------------
+def updateZoomBox#0
+    if mouseState:dragging
+        if mouseState:lastX <> mouseState:currentX or mouseState:lastY <> mouseState:currentY
+            // Clear old box
+            drawZoomBox(mouseState:startX, mouseState:startY,
+                       mouseState:lastX, mouseState:lastY)
+
+            // Draw new box
+            drawZoomBox(mouseState:startX, mouseState:startY,
+                       mouseState:currentX, mouseState:currentY)
+
+            mouseState:lastX = mouseState:currentX
+            mouseState:lastY = mouseState:currentY
+        fin
+    fin
+end
+
+//------------------------------------------------------------------------------
+// Calculate Zoom Bounds
+//------------------------------------------------------------------------------
+def calculateZoomBounds(pSettings, pNewBounds)#0
+    byte[10] realMin, imagMin, realMax, imagMax
+    word x1, y1, x2, y2, temp
+
+    x1 = mouseState:startX
+    y1 = mouseState:startY
+    x2 = mouseState:lastX
+    y2 = mouseState:lastY
+
+    if x1 > x2
+        temp = x1
+        x1 = x2
+        x2 = temp
+    fin
+    if y1 > y2
+        temp = y1
+        y1 = y2
+        y2 = temp
+    fin
+
+    screenToComplex(x1, y1, pSettings, @realMin, @imagMin)
+    screenToComplex(x2, y2, pSettings, @realMax, @imagMax)
+
+    memcpy(pNewBounds + 0,  @realMin, 10)
+    memcpy(pNewBounds + 10, @imagMin, 10)
+    memcpy(pNewBounds + 20, @realMax, 10)
+    memcpy(pNewBounds + 30, @imagMax, 10)
+end
+
+//------------------------------------------------------------------------------
+// Check if Zoom Complete
+//------------------------------------------------------------------------------
+def isZoomComplete#1
+    if not mouseState:hasMouseHardware
+        return FALSE
+    fin
+
+    if mouseState:buttonDown == FALSE and mouseState:dragging == FALSE
+        if abs(mouseState:lastX - mouseState:startX) > 3 and
+           abs(mouseState:lastY - mouseState:startY) > 3
+            return TRUE
+        fin
+    fin
+
+    return FALSE
+end
+
+//------------------------------------------------------------------------------
+// Print Coordinates
+//------------------------------------------------------------------------------
+def printCoords(label, pReal, pImag)#0
+    byte[80] buffer
+
+    puts(label)
+    fpu:loadExt(pReal)
+    fpu:pullStr(@buffer, 0, 4, 0)
+    puts(@buffer)
+    puts(" + ")
+    fpu:loadExt(pImag)
+    fpu:pullStr(@buffer, 0, 4, 0)
+    puts(@buffer)
+    puts("i\n")
+end
+
+//------------------------------------------------------------------------------
+// Main Test Program
+//------------------------------------------------------------------------------
+def testMouseZoom#0
+    byte[t_settings] newBounds
+    byte quit, key
+    word testCount
+
+    puts("=== Mouse Zoom Integration Test ===\n\n")
+
+    // Test 1: Mouse Detection
+    puts("Test 1: Mouse Detection\n")
+    if detectMouse()
+        puts("  [PASS] Mouse hardware detected\n")
+    else
+        puts("  [FAIL] No mouse hardware found\n")
+        puts("  This test requires a mouse driver\n")
+        return
+    fin
+    puts("\n")
+
+    // Test 2: Visual Zoom Box Test
+    puts("Test 2: Visual Zoom Box Drawing\n")
+    puts("  Instructions:\n")
+    puts("  - Click and drag to draw zoom boxes\n")
+    puts("  - Press Q to quit test\n")
+    puts("  - Each zoom will print coordinates\n\n")
+    puts("Press any key to start...\n")
+    ^$C010  // Clear keyboard strobe
+    while ^$C000 < 128; loop
+    ^$C010
+
+    // Initialize FPU
+    fpu:reset()
+
+    // Setup mock settings (default Mandelbrot bounds)
+    fpu:pushInt(-2)
+    fpu:storExt(@testSettings:realMin)
+    fpu:pushInt(1)
+    fpu:storExt(@testSettings:realMax)
+    fpu:pushInt(-1)
+    fpu:storExt(@testSettings:imagMin)
+    fpu:pushInt(1)
+    fpu:storExt(@testSettings:imagMax)
+
+    // Enter graphics mode
+    dgrMode(dgrPage1)
+    dgrDrawBuf(dgrPage1)
+
+    // Clear screen with gradient for visual reference
+    for key = 0 to 15
+        dgrColor(key)
+        dgrHLin(0, 79, key * 3)
+        dgrHLin(0, 79, key * 3 + 1)
+        dgrHLin(0, 79, key * 3 + 2)
+    next
+
+    testCount = 0
+    quit = FALSE
+
+    while not quit
+        // Poll mouse
+        pollMouse()
+
+        // Update zoom box visual
+        updateZoomBox()
+
+        // Check for zoom completion
+        if isZoomComplete()
+            testCount++
+
+            // Calculate new bounds
+            calculateZoomBounds(@testSettings, @newBounds)
+
+            // Switch to text mode to display results
+            dgrMode(dgrOff)
+            conio:textmode(0)
+
+            puts("\n=== Zoom #")
+            puti(testCount)
+            puts(" Complete ===\n")
+
+            puts("Screen Box: (")
+            puti(mouseState:startX)
+            puts(", ")
+            puti(mouseState:startY)
+            puts(") to (")
+            puti(mouseState:lastX)
+            puts(", ")
+            puti(mouseState:lastY)
+            puts(")\n")
+
+            printCoords("Top-Left:     ", @newBounds + 0, @newBounds + 10)
+            printCoords("Bottom-Right: ", @newBounds + 20, @newBounds + 30)
+
+            puts("\nPress any key to continue (Q to quit)...\n")
+            key = toupper(conio:getkey() & $7F)
+            if key == 'Q'
+                quit = TRUE
+            else
+                // Return to graphics mode
+                dgrMode(dgrPage1)
+                dgrDrawBuf(dgrPage1)
+            fin
+
+            // Reset mouse state
+            mouseState:buttonDown = FALSE
+            mouseState:dragging = FALSE
+        fin
+
+        // Check for keyboard quit
+        if ^$C000 >= 128
+            key = toupper(^$C000 & $7F)
+            ^$C010
+            if key == 'Q'
+                quit = TRUE
+            fin
+        fin
+    loop
+
+    // Cleanup
+    dgrMode(dgrOff)
+    if mouseAPI
+        mouseAPI=>detachMouse()
+    fin
+
+    conio:textmode(0)
+    puts("\n=== Test Complete ===\n")
+    puts("Total zooms tested: ")
+    puti(testCount)
+    putln
+end
+
+//------------------------------------------------------------------------------
+// Run Tests
+//------------------------------------------------------------------------------
+testMouseZoom()
+done

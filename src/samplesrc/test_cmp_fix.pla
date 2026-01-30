@@ -1,0 +1,134 @@
+//
+// Test MegaFlash FPU comparison fix
+// Verifies that hardware cmp() matches SANE behavior
+//
+include "inc/cmdsys.plh"
+include "inc/fpumf.plh"
+include "inc/conio.plh"
+
+def main#0
+  word cmpResult
+  byte[20] strBuf
+
+  // Initialize FPU
+  fpumf:reset()
+
+  puts("=== MEGAFLASH FPU COMPARISON FIX TEST ===\n\n")
+  puts("Testing the sign inversion fix for hardware cmp()\n")
+  putln
+
+  // Test 1: 0 vs 4.0 (should return FPUCMPGT because 4.0 > 0)
+  puts("Test 1: Compare 0.0 vs 4.0\n")
+  fpumf:pushStr("0.0")
+  fpumf:pushStr("4.0")
+  cmpResult = fpumf:cmp()
+  puts("  Result = ")
+  puti(cmpResult)
+  puts(" (hex: ")
+  puth(cmpResult)
+  puts(")\n")
+  puts("  Expected FPUCMPGT = ")
+  puti(FPUCMPGT)
+  puts(" (hex: ")
+  puth(FPUCMPGT)
+  puts(")\n")
+  if cmpResult == FPUCMPGT
+    puts("  => CORRECT: 4.0 > 0.0\n")
+  elsif cmpResult == FPUCMPLT
+    puts("  => WRONG: Says 4.0 < 0.0 (BUG!)\n")
+  elsif cmpResult == FPUCMPEQ
+    puts("  => WRONG: Says 4.0 == 0.0\n")
+  fin
+  putln
+
+  // Test 2: 7.25 vs 4.0 (should return FPUCMPLT because 4.0 < 7.25)
+  puts("Test 2: Compare 7.25 vs 4.0\n")
+  fpumf:pushStr("7.25")
+  fpumf:pushStr("4.0")
+  cmpResult = fpumf:cmp()
+  puts("  Result = ")
+  puti(cmpResult)
+  puts(" (hex: ")
+  puth(cmpResult)
+  puts(")\n")
+  puts("  Expected FPUCMPLT = ")
+  puti(FPUCMPLT)
+  puts(" (hex: ")
+  puth(FPUCMPLT)
+  puts(")\n")
+  if cmpResult == FPUCMPLT
+    puts("  => CORRECT: 4.0 < 7.25\n")
+  elsif cmpResult == FPUCMPGT
+    puts("  => WRONG: Says 4.0 > 7.25 (BUG!)\n")
+  elsif cmpResult == FPUCMPEQ
+    puts("  => WRONG: Says 4.0 == 7.25\n")
+  fin
+  putln
+
+  // Test 3: 4.0 vs 4.0 (should return FPUCMPEQ)
+  puts("Test 3: Compare 4.0 vs 4.0\n")
+  fpumf:pushStr("4.0")
+  fpumf:pushStr("4.0")
+  cmpResult = fpumf:cmp()
+  puts("  Result = ")
+  puti(cmpResult)
+  puts(" (hex: ")
+  puth(cmpResult)
+  puts(")\n")
+  puts("  Expected FPUCMPEQ = ")
+  puti(FPUCMPEQ)
+  puts(" (hex: ")
+  puth(FPUCMPEQ)
+  puts(")\n")
+  if cmpResult == FPUCMPEQ
+    puts("  => CORRECT: 4.0 == 4.0\n")
+  elsif cmpResult == FPUCMPGT
+    puts("  => WRONG: Says 4.0 > 4.0\n")
+  elsif cmpResult == FPUCMPLT
+    puts("  => WRONG: Says 4.0 < 4.0\n")
+  fin
+  putln
+
+  // Test 4: Mandelbrot escape condition (magnitude_sq > 4.0)
+  puts("Test 4: Mandelbrot escape test (7.25 > 4.0?)\n")
+  fpumf:pushStr("7.25")  // magnitude_sq
+  fpumf:pushStr("4.0")
+  cmpResult = fpumf:cmp()
+  puts("  Result = ")
+  puti(cmpResult)
+  puts(" (hex: ")
+  puth(cmpResult)
+  puts(")\n")
+  if cmpResult == FPUCMPLT
+    puts("  => CORRECT: 4.0 < 7.25 (ESCAPED!)\n")
+  else
+    puts("  => WRONG: Should have escaped (BUG!)\n")
+  fin
+  putln
+
+  // Test 5: Mandelbrot non-escape condition (magnitude_sq < 4.0)
+  puts("Test 5: Mandelbrot non-escape test (0.5 < 4.0?)\n")
+  fpumf:pushStr("0.5")  // magnitude_sq
+  fpumf:pushStr("4.0")
+  cmpResult = fpumf:cmp()
+  puts("  Result = ")
+  puti(cmpResult)
+  puts(" (hex: ")
+  puth(cmpResult)
+  puts(")\n")
+  if cmpResult == FPUCMPGT
+    puts("  => CORRECT: 4.0 > 0.5 (DID NOT ESCAPE)\n")
+  else
+    puts("  => WRONG: Should not have escaped (BUG!)\n")
+  fin
+  putln
+
+  puts("=== All Tests Complete ===\n")
+  puts("If all tests show CORRECT, the fix works!\n")
+  putln
+  puts("Press any key...\n")
+  conio:getkey()
+end
+
+main
+done

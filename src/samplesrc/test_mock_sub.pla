@@ -1,0 +1,139 @@
+//
+// Mock sub() with known correct results
+// This bypasses hardware to test PLASMA-level logic
+//
+include "inc/cmdsys.plh"
+
+// Comparison result constants
+const FPUCMPGT = $4040
+const FPUCMPLT = $8080
+const FPUCMPEQ = $0002
+
+// MBF constants for test results
+// MBF format: [0]=exp, [1-4]=mantissa, [5]=sign+mantissa, [6]=extension
+//
+// MBF of 5.0 (positive): exp=$82, sign byte (5) has bit 7 clear
+byte[7] mbf_pos5 = $82, $20, $00, $00, $00, $00, $00
+
+// MBF of -4.0 (negative): exp=$82, sign byte (5) has bit 7 set
+byte[7] mbf_neg4 = $82, $80, $00, $00, $00, $80, $00
+
+// MBF of 0.0 (zero): exp=$00
+byte[7] mbf_zero = $00, $00, $00, $00, $00, $00, $00
+
+// Stack registers (simulate fpumf internal structure)
+byte stack[28]  // 4 registers * 7 bytes
+word stackRegs[4]
+
+// Initialize stack registers
+def initStack#0
+    byte i
+    word ptr
+
+    for i = 0 to 3
+        ptr = @stack[i * 7]
+        stackRegs.[i] = ptr
+        // Clear to zero
+        ^(ptr + 0) = 0
+        ^(ptr + 1) = 0
+        ^(ptr + 2) = 0
+        ^(ptr + 3) = 0
+        ^(ptr + 4) = 0
+        ^(ptr + 5) = 0
+        ^(ptr + 6) = 0
+    next
+end
+
+// Mock _drop() - shift stackRegs[1] to stackRegs[0]
+def mockDrop#0
+    byte i
+    word temp
+
+    // Rotate: stackRegs[0] = stackRegs[1], [1] = [2], [2] = [3], [3] = old [0]
+    temp = stackRegs.0
+    stackRegs.0 = stackRegs.1
+    stackRegs.1 = stackRegs.2
+    stackRegs.2 = stackRegs.3
+    stackRegs.3 = temp
+
+    // Copy bytes from [2] to [3]
+    for i = 0 to 6
+        ^(stackRegs.3 + i) = ^(stackRegs.2 + i)
+    next
+end
+
+// Mock sub() that returns known result
+def mockSub(pResult)#0
+    byte i
+
+    // Simulate: receiveFAC puts result in stackRegs[1]
+    for i = 0 to 6
+        ^(stackRegs.1 + i) = pResult->[i]
+    next
+
+    // Then _drop() shifts to stackRegs[0]
+    mockDrop()
+end
+
+// Test cmp logic with mocked sub
+def testMockedCmp(label, pMockResult, expected)#0
+    word result
+
+    puts(label)
+    puts(": ")
+
+    // Mock: sub() has put result in stackRegs[0]
+    mockSub(pMockResult)
+
+    // Now execute cmp() logic
+    if ^(stackRegs.0 + 0) == 0
+        result = FPUCMPEQ
+    elsif ^(stackRegs.0 + 5) & $80
+        result = FPUCMPLT
+    else
+        result = FPUCMPGT
+    fin
+
+    // Report
+    puts("got=$")
+    puth(result)
+    puts(" expected=$")
+    puth(expected)
+
+    if result == expected
+        puts(" PASS")
+    else
+        puts(" FAIL")
+    fin
+    putln
+
+    // Dump stackRegs[0] for diagnostic
+    puts("  stackRegs[0]: exp=$")
+    puth(^(stackRegs.0 + 0))
+    puts(" sign=$")
+    puth(^(stackRegs.0 + 5))
+    putln
+end
+
+def main#0
+    initStack()
+
+    puts("=== Mocked Sub/Cmp Test ===\n")
+    puts("Testing if _drop() and cmp logic work correctly\n\n")
+
+    // Test 1: Positive result (10.0 - 5.0 = 5.0)
+    testMockedCmp("Test1_Positive", @mbf_pos5, FPUCMPGT)
+
+    // Test 2: Negative result (3.0 - 7.0 = -4.0)
+    testMockedCmp("Test2_Negative", @mbf_neg4, FPUCMPLT)
+
+    // Test 3: Zero result (6.0 - 6.0 = 0.0)
+    testMockedCmp("Test3_Zero", @mbf_zero, FPUCMPEQ)
+
+    putln
+    puts("If all PASS, then _drop() and cmp() logic work correctly.\n")
+    puts("Bug must be in hardware interaction or sub() implementation.\n")
+end
+
+main
+done

@@ -1,0 +1,383 @@
+//
+// Mandelbrot Settings Editor Test
+// Standalone test for Agent 2's settings editor module
+//
+include "inc/cmdsys.plh"
+include "inc/conio.plh"
+include "inc/fpstr.plh"
+include "inc/fpu.plh"
+
+//
+// Settings structure (matches mandel.pla)
+//
+struc t_mandel_settings
+  byte[10] real_min
+  byte[10] real_max
+  byte[10] imag_min
+  byte[10] imag_max
+  word max_iter
+end
+
+//
+// Global settings
+//
+byte[t_mandel_settings] settings
+
+//
+// Settings editor state
+//
+const FIELD_REAL_MIN = 0
+const FIELD_REAL_MAX = 1
+const FIELD_IMAG_MIN = 2
+const FIELD_IMAG_MAX = 3
+const FIELD_ITERATIONS = 4
+const NUM_FIELDS = 5
+
+byte currentField = FIELD_REAL_MIN
+byte editMode = FALSE
+byte settingsVisible = FALSE
+
+//
+// String buffers for display
+//
+byte[32] editBuffer
+byte[32] realMinStr
+byte[32] realMaxStr
+byte[32] imagMinStr
+byte[32] imagMaxStr
+byte[16] iterStr
+
+//
+// Initialize default settings
+//
+def initSettings#0
+  byte[10] tempFP
+
+  // Initialize real_min = -2.5
+  fpu:pushStr("-2.5")
+  fpu:pullExt(@tempFP)
+  memcpy(@settings.real_min, @tempFP, 10)
+
+  // Initialize real_max = 1.0
+  fpu:pushStr("1.0")
+  fpu:pullExt(@tempFP)
+  memcpy(@settings.real_max, @tempFP, 10)
+
+  // Initialize imag_min = -1.0
+  fpu:pushStr("-1.0")
+  fpu:pullExt(@tempFP)
+  memcpy(@settings.imag_min, @tempFP, 10)
+
+  // Initialize imag_max = 1.0
+  fpu:pushStr("1.0")
+  fpu:pullExt(@tempFP)
+  memcpy(@settings.imag_max, @tempFP, 10)
+
+  // Initialize iterations
+  settings:max_iter = 100
+end
+
+//
+// Format settings to strings
+//
+def formatSettings#0
+  ext2str(@settings.real_min, @realMinStr, 3, 6, FPSTR_FIXED)
+  ext2str(@settings.real_max, @realMaxStr, 3, 6, FPSTR_FIXED)
+  ext2str(@settings.imag_min, @imagMinStr, 3, 6, FPSTR_FIXED)
+  ext2str(@settings.imag_max, @imagMaxStr, 3, 6, FPSTR_FIXED)
+  sprintf1(@iterStr, "%d", settings:max_iter)
+end
+
+//
+// Display settings overlay
+//
+def displaySettings#0
+  word row
+
+  if not settingsVisible
+    return
+  fin
+
+  formatSettings
+
+  row = 22
+  gotoxy(0, row)
+  puts("Real: [")
+  if currentField == FIELD_REAL_MIN and editMode
+    textctrl(ctrlattr, INVERSE)
+  fin
+  puts(@realMinStr)
+  textctrl(ctrlattr, NORMAL)
+  puts("] to [")
+  if currentField == FIELD_REAL_MAX and editMode
+    textctrl(ctrlattr, INVERSE)
+  fin
+  puts(@realMaxStr)
+  textctrl(ctrlattr, NORMAL)
+  puts("]")
+
+  row = 23
+  gotoxy(0, row)
+  puts("Imag: [")
+  if currentField == FIELD_IMAG_MIN and editMode
+    textctrl(ctrlattr, INVERSE)
+  fin
+  puts(@imagMinStr)
+  textctrl(ctrlattr, NORMAL)
+  puts("] to [")
+  if currentField == FIELD_IMAG_MAX and editMode
+    textctrl(ctrlattr, INVERSE)
+  fin
+  puts(@imagMaxStr)
+  textctrl(ctrlattr, NORMAL)
+  puts("]  Iter: ")
+  if currentField == FIELD_ITERATIONS and editMode
+    textctrl(ctrlattr, INVERSE)
+  fin
+  puts(@iterStr)
+  textctrl(ctrlattr, NORMAL)
+end
+
+//
+// Validate settings
+//
+def validateSettings#1
+  word cmpResult
+
+  fpu:pushExt(@settings.real_min)
+  fpu:pushExt(@settings.real_max)
+  cmpResult = fpu:cmpXY()
+  if cmpResult == FPUCMPGT or cmpResult == FPUCMPEQ
+    puts("\nError: Real min must be < Real max\n")
+    return FALSE
+  fin
+
+  fpu:pushExt(@settings.imag_min)
+  fpu:pushExt(@settings.imag_max)
+  cmpResult = fpu:cmpXY()
+  if cmpResult == FPUCMPGT or cmpResult == FPUCMPEQ
+    puts("\nError: Imag min must be < Imag max\n")
+    return FALSE
+  fin
+
+  if settings:max_iter == 0
+    puts("\nError: Iterations must be > 0\n")
+    return FALSE
+  fin
+
+  return TRUE
+end
+
+//
+// Get field pointer
+//
+def getFieldPointer(field)#1
+  when field
+    is FIELD_REAL_MIN
+      return @settings.real_min
+    is FIELD_REAL_MAX
+      return @settings.real_max
+    is FIELD_IMAG_MIN
+      return @settings.imag_min
+    is FIELD_IMAG_MAX
+      return @settings.imag_max
+    is FIELD_ITERATIONS
+      return @settings.max_iter
+  wend
+  return 0
+end
+
+//
+// Get field string
+//
+def getFieldString(field)#1
+  when field
+    is FIELD_REAL_MIN
+      return @realMinStr
+    is FIELD_REAL_MAX
+      return @realMaxStr
+    is FIELD_IMAG_MIN
+      return @imagMinStr
+    is FIELD_IMAG_MAX
+      return @imagMaxStr
+    is FIELD_ITERATIONS
+      return @iterStr
+  wend
+  return 0
+end
+
+//
+// Edit current field
+//
+def editCurrentField#0
+  byte key
+  byte cursorPos
+  word strPtr
+  word fieldPtr
+
+  strPtr = getFieldString(currentField)
+  strcpy(@editBuffer, strPtr)
+  cursorPos = ^editBuffer
+
+  editMode = TRUE
+  displaySettings
+
+  repeat
+    key = getkey()
+
+    when key
+      is keyenter
+        if currentField == FIELD_ITERATIONS
+          settings:max_iter = strtoul(@editBuffer, 0, 10)
+        else
+          fieldPtr = getFieldPointer(currentField)
+          if str2ext(@editBuffer, fieldPtr) == 0
+            puts("\nInvalid number!\n")
+            strcpy(@editBuffer, strPtr)
+          fin
+        fin
+        break
+
+      is keyescape
+        strcpy(@editBuffer, strPtr)
+        break
+
+      is keyarrowleft
+        if cursorPos > 0
+          cursorPos = cursorPos - 1
+        fin
+
+      is keyarrowright
+        if cursorPos < ^editBuffer
+          cursorPos = cursorPos + 1
+        fin
+
+      is keydelete, $08
+        if cursorPos > 0
+          memcpy(@editBuffer + cursorPos, @editBuffer + cursorPos + 1, ^editBuffer - cursorPos)
+          ^editBuffer = ^editBuffer - 1
+          cursorPos = cursorPos - 1
+          editBuffer[^editBuffer] = 0
+        fin
+
+      otherwise
+        if key >= ' ' and key <= '~' and ^editBuffer < 30
+          if cursorPos < ^editBuffer
+            memcpy(@editBuffer + cursorPos + 1, @editBuffer + cursorPos, ^editBuffer - cursorPos + 1)
+          fin
+          editBuffer[cursorPos + 1] = key
+          ^editBuffer = ^editBuffer + 1
+          cursorPos = cursorPos + 1
+        fin
+    wend
+
+    strcpy(strPtr, @editBuffer)
+    displaySettings
+  until FALSE
+
+  editMode = FALSE
+  displaySettings
+end
+
+//
+// Handle TAB key
+//
+def handleTabKey#0
+  byte key
+
+  settingsVisible = not settingsVisible
+
+  if not settingsVisible
+    gotoxy(0, 22)
+    clear(cleol)
+    gotoxy(0, 23)
+    clear(cleol)
+    return
+  fin
+
+  currentField = FIELD_REAL_MIN
+  displaySettings
+
+  repeat
+    key = getkey()
+
+    when key
+      is keytab
+        settingsVisible = FALSE
+        gotoxy(0, 22)
+        clear(cleol)
+        gotoxy(0, 23)
+        clear(cleol)
+        break
+
+      is keyarrowdown
+        currentField = (currentField + 1) % NUM_FIELDS
+        displaySettings
+
+      is keyarrowup
+        currentField = (currentField + NUM_FIELDS - 1) % NUM_FIELDS
+        displaySettings
+
+      is keyenter
+        editCurrentField
+        if not validateSettings
+          initSettings
+        fin
+        displaySettings
+
+      is keyescape
+        settingsVisible = FALSE
+        gotoxy(0, 22)
+        clear(cleol)
+        gotoxy(0, 23)
+        clear(cleol)
+        break
+
+      is 'R', 'r'
+        initSettings
+        displaySettings
+    wend
+  until not settingsVisible
+end
+
+//
+// Main test program
+//
+def main#0
+  fpu:reset()
+
+  clear(cls)
+
+  initSettings
+
+  gotoxy(0, 0)
+  puts("Mandelbrot Settings Editor Test\n")
+  puts("================================\n\n")
+  puts("Press TAB to toggle settings editor\n")
+  puts("Arrow keys to navigate fields\n")
+  puts("ENTER to edit field\n")
+  puts("ESC to exit settings\n")
+  puts("R to reset to defaults\n")
+  puts("Q to quit test\n\n")
+
+  if validateSettings
+    puts("Initial settings validated OK\n")
+  fin
+
+  repeat
+    byte key
+    key = getkey()
+
+    if key == keytab
+      handleTabKey
+    elsif key == 'Q' or key == 'q'
+      break
+    fin
+  until FALSE
+
+  clear(cls)
+  puts("Test complete\n")
+end
+
+main
+done

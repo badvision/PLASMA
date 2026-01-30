@@ -1,0 +1,7 @@
+include "inc/cmdsys.plh"
+include "inc/fpstr.plh"
+include "inc/fpu_mf.plh"
+
+puts("Test\n")
+fpu:reset
+done

@@ -1,0 +1,328 @@
+//==============================================================================
+// Mouse Integration Module for Mandelbrot Renderer
+// Agent 3 - Mouse Zoom Integration
+//
+// This module provides:
+// - Runtime mouse detection with graceful fallback
+// - Mouse event polling (button, position)
+// - XOR-based zoom box drawing
+// - Coordinate recalculation for zoom
+//==============================================================================
+
+include "inc/mouse.plh"
+include "inc/dgrlib.plh"
+include "inc/fpu.plh"
+
+//------------------------------------------------------------------------------
+// Mouse state structure
+//------------------------------------------------------------------------------
+struc t_mouseState
+    byte hasMouseHardware    // TRUE if mouse detected, FALSE otherwise
+    byte buttonDown          // TRUE if button currently down
+    byte dragging            // TRUE if currently dragging zoom box
+    word startX              // Starting X coordinate of zoom box
+    word startY              // Starting Y coordinate of zoom box
+    word currentX            // Current X coordinate
+    word currentY            // Current Y coordinate
+    word lastX               // Last drawn X for XOR cleanup
+    word lastY               // Last drawn Y for XOR cleanup
+end
+
+// Global mouse state
+byte[t_mouseState] mouseState
+
+// Mouse API handle
+word mouseAPI = 0
+
+//------------------------------------------------------------------------------
+// Mouse Detection - Runtime detection with graceful fallback
+//------------------------------------------------------------------------------
+def detectMouse#1
+    word mptr
+
+    // Try to load mouse driver
+    mptr = syscall($7F, @"MOUSE")
+    if mptr
+        mouseAPI = mptr
+        mouseState:hasMouseHardware = TRUE
+
+        // Initialize mouse with default mode
+        mouseAPI=>setMouse(MOUSE_ENABLE)
+        mouseAPI=>posMouse(40, 24)  // Center of double-res screen (80x48)
+        mouseAPI=>clampMouse(0, 79, 0, 47)  // Clamp to DGR screen bounds
+
+        return TRUE
+    else
+        mouseState:hasMouseHardware = FALSE
+        mouseAPI = 0
+        return FALSE
+    fin
+end
+
+//------------------------------------------------------------------------------
+// Poll Mouse - Read mouse position and button state
+//------------------------------------------------------------------------------
+def pollMouse#0
+    byte[3] mouseData
+    byte status
+    word mx, my
+
+    if not mouseState:hasMouseHardware
+        return
+    fin
+
+    // Read mouse state
+    status = mouseAPI=>readMouse(@mouseData)
+
+    // Extract position (words at offsets 0 and 2)
+    mx = mouseData.0
+    my = mouseData.2
+
+    // Update current position
+    mouseState:currentX = mx
+    mouseState:currentY = my
+
+    // Check button state
+    if status & BUTTON_DOWN
+        if not mouseState:buttonDown
+            // Button just pressed - start drag
+            mouseState:buttonDown = TRUE
+            mouseState:dragging = TRUE
+            mouseState:startX = mx
+            mouseState:startY = my
+            mouseState:lastX = mx
+            mouseState:lastY = my
+        fin
+    else
+        if mouseState:buttonDown
+            // Button just released - end drag
+            mouseState:buttonDown = FALSE
+            if mouseState:dragging
+                mouseState:dragging = FALSE
+                // Return TRUE via global flag that zoom was completed
+            fin
+        fin
+    fin
+end
+
+//------------------------------------------------------------------------------
+// Draw Zoom Box - XOR drawing for visual feedback
+//
+// Uses XOR mode so drawing over existing box clears it without corrupting
+// the underlying Mandelbrot graphics.
+//------------------------------------------------------------------------------
+def drawZoomBox(x1, y1, x2, y2)#0
+    word temp
+
+    // Ensure x1 <= x2 and y1 <= y2
+    if x1 > x2
+        temp = x1
+        x1 = x2
+        x2 = temp
+    fin
+    if y1 > y2
+        temp = y1
+        y1 = y2
+        y2 = temp
+    fin
+
+    // Save current drawing mode
+    // Note: DGR library should support XOR mode
+    // For now, we'll use color 15 (white) which XORs well against most colors
+    dgrColor(15)
+
+    // Draw rectangle using horizontal and vertical lines
+    dgrHLin(x1, x2, y1)  // Top
+    dgrHLin(x1, x2, y2)  // Bottom
+    dgrVLin(y1, y2, x1)  // Left
+    dgrVLin(y1, y2, x2)  // Right
+end
+
+//------------------------------------------------------------------------------
+// Clear Last Zoom Box - XOR with last position to clear
+//------------------------------------------------------------------------------
+def clearLastZoomBox#0
+    if mouseState:dragging
+        drawZoomBox(mouseState:startX, mouseState:startY,
+                   mouseState:lastX, mouseState:lastY)
+    fin
+end
+
+//------------------------------------------------------------------------------
+// Update Zoom Box - Clear old, draw new
+//------------------------------------------------------------------------------
+def updateZoomBox#0
+    if mouseState:dragging
+        // Clear old box by XOR-ing again
+        if mouseState:lastX <> mouseState:currentX or mouseState:lastY <> mouseState:currentY
+            clearLastZoomBox()
+
+            // Draw new box
+            drawZoomBox(mouseState:startX, mouseState:startY,
+                       mouseState:currentX, mouseState:currentY)
+
+            // Update last position
+            mouseState:lastX = mouseState:currentX
+            mouseState:lastY = mouseState:currentY
+        fin
+    fin
+end
+
+//------------------------------------------------------------------------------
+// Coordinate Recalculation - Map screen coords to complex plane
+//
+// This function takes the zoom box coordinates and calculates new complex
+// plane bounds. It requires the screenToComplex function from Agent 1.
+//
+// STUB: This will be completed once Agent 1 provides screenToComplex
+//------------------------------------------------------------------------------
+
+// Forward declaration - will be provided by Agent 1
+predef screenToComplex(px, py, pSettings, pReal, pImag)#0
+
+def calculateZoomBounds(pSettings, pNewBounds)#0
+    byte[t_fpureg] realMin, imagMin, realMax, imagMax
+    word x1, y1, x2, y2
+    word temp
+
+    // Get zoom box coordinates (normalized)
+    x1 = mouseState:startX
+    y1 = mouseState:startY
+    x2 = mouseState:lastX
+    y2 = mouseState:lastY
+
+    // Ensure x1 <= x2 and y1 <= y2
+    if x1 > x2
+        temp = x1
+        x1 = x2
+        x2 = temp
+    fin
+    if y1 > y2
+        temp = y1
+        y1 = y2
+        y2 = temp
+    fin
+
+    // Convert top-left corner to complex coordinates
+    screenToComplex(x1, y1, pSettings, @realMin, @imagMin)
+
+    // Convert bottom-right corner to complex coordinates
+    screenToComplex(x2, y2, pSettings, @realMax, @imagMax)
+
+    // Store new bounds in output structure
+    // Note: imagMin and imagMax may need to be swapped depending on
+    // coordinate system orientation (y increases down on screen)
+    memcpy(pNewBounds + 0,  @realMin, t_fpureg)
+    memcpy(pNewBounds + 10, @imagMin, t_fpureg)
+    memcpy(pNewBounds + 20, @realMax, t_fpureg)
+    memcpy(pNewBounds + 30, @imagMax, t_fpureg)
+end
+
+//------------------------------------------------------------------------------
+// Check for Zoom Complete
+//------------------------------------------------------------------------------
+def isZoomComplete#1
+    // Returns TRUE if user completed a zoom box drag
+    if not mouseState:hasMouseHardware
+        return FALSE
+    fin
+
+    // Check if drag was completed (button released after dragging)
+    if mouseState:buttonDown == FALSE and mouseState:dragging == FALSE
+        // Check if we had a valid drag (moved at least a few pixels)
+        if abs(mouseState:lastX - mouseState:startX) > 3 and
+           abs(mouseState:lastY - mouseState:startY) > 3
+            return TRUE
+        fin
+    fin
+
+    return FALSE
+end
+
+//------------------------------------------------------------------------------
+// Reset Mouse State - Prepare for next interaction
+//------------------------------------------------------------------------------
+def resetMouseState#0
+    mouseState:buttonDown = FALSE
+    mouseState:dragging = FALSE
+    mouseState:startX = 0
+    mouseState:startY = 0
+    mouseState:lastX = 0
+    mouseState:lastY = 0
+end
+
+//------------------------------------------------------------------------------
+// Main Mouse Event Loop Integration
+//
+// This function should be called in the main event loop to:
+// 1. Poll mouse state
+// 2. Update zoom box drawing
+// 3. Check for zoom completion
+//
+// Returns TRUE if zoom was completed and render should restart
+//------------------------------------------------------------------------------
+def handleMouseEvents(pSettings, pNewBounds)#1
+    if not mouseState:hasMouseHardware
+        return FALSE
+    fin
+
+    // Poll current mouse state
+    pollMouse()
+
+    // Update zoom box visual feedback
+    updateZoomBox()
+
+    // Check if zoom was completed
+    if isZoomComplete()
+        // Clear the final zoom box
+        clearLastZoomBox()
+
+        // Calculate new coordinate bounds
+        calculateZoomBounds(pSettings, pNewBounds)
+
+        // Reset for next interaction
+        resetMouseState()
+
+        return TRUE
+    fin
+
+    return FALSE
+end
+
+//------------------------------------------------------------------------------
+// Shutdown Mouse
+//------------------------------------------------------------------------------
+def shutdownMouse#0
+    if mouseState:hasMouseHardware and mouseAPI
+        mouseAPI=>detachMouse()
+        mouseAPI = 0
+    fin
+end
+
+//==============================================================================
+// USAGE NOTES FOR INTEGRATION INTO MANDEL.PLA:
+//
+// 1. At startup, call detectMouse() to check for hardware
+//    Example:
+//      if detectMouse()
+//          puts("Mouse detected - click and drag to zoom\n")
+//      fin
+//
+// 2. In main render loop, call handleMouseEvents():
+//    Example:
+//      while rendering
+//          // ... render pixels ...
+//
+//          if handleMouseEvents(@settings, @newBounds)
+//              // User completed zoom - update settings and re-render
+//              memcpy(@settings, @newBounds, 4 * t_fpureg)
+//              break  // Exit render loop to restart with new bounds
+//          fin
+//      loop
+//
+// 3. At shutdown, call shutdownMouse()
+//
+// 4. Requires screenToComplex() function from Agent 1
+//==============================================================================
+
+done

@@ -1,0 +1,42 @@
+//
+// Minimal Trace Test Program
+// Tests the $FC $5C instruction for Jace sysout debugging
+//
+
+include "inc/cmdsys.plh"
+include "inc/conio.plh"
+
+//
+// Test trace output at program start
+//
+asm testTrace#0
+    // Output trace sequence: ZYXWVU
+    !byte $FC, $5C, 'Z'
+    !byte $FC, $5C, 'Y'
+    !byte $FC, $5C, 'X'
+    !byte $FC, $5C, 'W'
+    !byte $FC, $5C, 'V'
+    !byte $FC, $5C, 'U'
+    RTS
+end
+
+//
+// Main program
+//
+def main#0
+    puts("\nTrace Test Program\n")
+    puts("==================\n")
+    puts("About to execute trace test...\n")
+
+    // Call trace test
+    testTrace()
+
+    puts("Trace test complete.\n")
+    puts("Check Jace terminal for: ZYXWVU\n")
+    puts("\nPress any key to exit...")
+    getc()
+end
+
+// Run the main program
+main()
+done

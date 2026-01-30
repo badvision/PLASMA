@@ -1,0 +1,179 @@
+//
+// Stack Corruption Diagnostic Test for cmp() failure
+// Tests FPU register stack state preservation
+//
+include "inc/cmdsys.plh"
+include "inc/fpumf.plh"
+include "inc/conio.plh"
+
+byte[7] testA, testB, testResult
+byte[80] strBuf
+
+//
+// Dump MBF value as hex
+//
+def dumpMBF(label, pMBF)#0
+    byte i
+    puts(label)
+    puts(": ")
+    for i = 0 to 6
+        puth(pMBF->[i])
+        puts(" ")
+    next
+    putln
+end
+
+//
+// Test that sub() preserves values when called from cmp()
+//
+def testSubPreservation#0
+    word cmpResult
+
+    puts("\n=== Testing sub() Value Preservation ===\n")
+
+    // Push test values: Y=5.0, X=3.0
+    // Expected: 5.0 - 3.0 = 2.0 (positive, so Y > X)
+    puts("Pushing Y=5.0, X=3.0\n")
+    fpumf:pushStr("5.0")
+    fpumf:pushStr("3.0")
+
+    // Manually examine stack state before cmp()
+    puts("\nStack state BEFORE cmp():\n")
+    fpumf:storMBF(@testA, 1)  // Save Y (stackRegs[1])
+    fpumf:storMBF(@testB, 0)  // Save X (stackRegs[0])
+    dumpMBF("  Y (stackRegs[1])", @testA)
+    dumpMBF("  X (stackRegs[0])", @testB)
+
+    // Re-push since storMBF doesn't restore
+    fpumf:pushStr("5.0")
+    fpumf:pushStr("3.0")
+
+    // Call cmp() which internally calls sub()
+    puts("\nCalling cmp()...\n")
+    cmpResult = fpumf:cmp()
+
+    puts("cmp() returned: ")
+    puth(cmpResult)
+    putln
+
+    if cmpResult == FPUCMPGT
+        puts("Result: Y > X (CORRECT)\n")
+    elsif cmpResult == FPUCMPLT
+        puts("Result: Y < X (WRONG!)\n")
+    elsif cmpResult == FPUCMPEQ
+        puts("Result: Y == X (WRONG!)\n")
+    else
+        puts("Result: INVALID CODE (ERROR!)\n")
+    fin
+end
+
+//
+// Test sub() directly to verify it works
+//
+def testSubDirect#0
+    puts("\n=== Testing sub() Directly ===\n")
+
+    // Push test values: Y=5.0, X=3.0
+    puts("Pushing Y=5.0, X=3.0\n")
+    fpumf:pushStr("5.0")
+    fpumf:pushStr("3.0")
+
+    puts("Stack BEFORE sub():\n")
+    fpumf:storMBF(@testA, 1)
+    fpumf:storMBF(@testB, 0)
+    dumpMBF("  Y", @testA)
+    dumpMBF("  X", @testB)
+
+    // Re-push
+    fpumf:pushStr("5.0")
+    fpumf:pushStr("3.0")
+
+    // Call sub() directly
+    puts("\nCalling sub()...\n")
+    fpumf:sub()
+
+    // Get result
+    fpumf:pullMBF(@testResult)
+    puts("\nResult after sub():\n")
+    dumpMBF("  Result", @testResult)
+
+    // Convert to string to display
+    fpumf:pushMBF(@testResult)
+    fpumf:pullStr(@strBuf, 1, 8, FPSTR_FIXED)
+    puts("  Decimal: ")
+    puts(@strBuf)
+    putln
+
+    // Check if positive (should be 2.0)
+    if testResult.5 & $80
+        puts("  Sign: NEGATIVE (WRONG!)\n")
+    else
+        puts("  Sign: POSITIVE (correct)\n")
+    fin
+
+    // Check if zero
+    if testResult.0 == 0
+        puts("  Value: ZERO (WRONG!)\n")
+    else
+        puts("  Value: NON-ZERO (correct)\n")
+    fin
+end
+
+//
+// Test that values survive the sub() sign flip operation
+//
+def testSignFlipCorruption#0
+    puts("\n=== Testing Sign Flip Side Effects ===\n")
+
+    // Push values
+    fpumf:pushStr("5.0")
+    fpumf:pushStr("3.0")
+
+    // Save X before sub()
+    fpumf:storMBF(@testA, 0)
+    puts("X BEFORE sub(): ")
+    dumpMBF("", @testA)
+
+    // Re-push
+    fpumf:pushStr("5.0")
+    fpumf:pushStr("3.0")
+
+    // Now call sub() which flips sign of X
+    fpumf:sub()
+    fpumf:pullMBF(@testResult)
+
+    puts("Result: ")
+    dumpMBF("", @testResult)
+
+    // Check: Did sub() corrupt the original stackRegs[0]?
+    // This would happen if sub() modifies X in-place then calls execBinaryOp
+    // which ALSO expects X to be there
+end
+
+//
+// Main test harness
+//
+def main#0
+    word err
+
+    // Initialize FPU
+    puts("Initializing MegaFlash FPU...\n")
+    err = fpumf:reset()
+    if err
+        puts("ERROR: FPU initialization failed!\n")
+        return
+    fin
+
+    // Run tests
+    testSubDirect()
+    testSignFlipCorruption()
+    testSubPreservation()
+
+    puts("\n=== Test Complete ===\n")
+    puts("If sub() works directly but cmp() fails,\n")
+    puts("the issue is in cmp()'s stack management.\n")
+end
+
+// Execute
+main()
+done

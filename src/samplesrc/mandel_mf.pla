@@ -128,13 +128,13 @@ def initSettings#0
   // real_range = real_max - real_min
   fpumf:pushStr(@settings.real_max)
   fpumf:pushStr(@settings.real_min)
-  fpumf:subXY()
+  fpumf:sub()
   fpumf:pullMBF(@real_range)
 
   // imag_range = imag_max - imag_min
   fpumf:pushStr(@settings.imag_max)
   fpumf:pushStr(@settings.imag_min)
-  fpumf:subXY()
+  fpumf:sub()
   fpumf:pullMBF(@imag_range)
 end
 
@@ -155,15 +155,15 @@ def screenToReal(screen_x)#0
   fpumf:pushInt(@temp_width)
 
   // Divide: screen_x / SCREEN_WIDTH
-  fpumf:divXY()
+  fpumf:div()
 
   // Multiply by real_range
   fpumf:pushMBF(@real_range)
-  fpumf:mulXY()
+  fpumf:mul()
 
   // Add real_min (from string)
   fpumf:pushStr(@settings.real_min)
-  fpumf:addXY()
+  fpumf:add()
 
   // Store in c_real
   fpumf:pullMBF(@c_real)
@@ -186,15 +186,15 @@ def screenToImag(screen_y)#0
   fpumf:pushInt(@temp_height)
 
   // Divide: screen_y / SCREEN_HEIGHT
-  fpumf:divXY()
+  fpumf:div()
 
   // Multiply by imag_range
   fpumf:pushMBF(@imag_range)
-  fpumf:mulXY()
+  fpumf:mul()
 
   // Add imag_min (from string)
   fpumf:pushStr(@settings.imag_min)
-  fpumf:addXY()
+  fpumf:add()
 
   // Store in c_imag
   fpumf:pullMBF(@c_imag)
@@ -255,19 +255,19 @@ def mandelbrotIterate(x, y)#1
     // Calculate z_real_sq = z_real * z_real
     fpumf:pushMBF(@z_real)
     fpumf:dupX()
-    fpumf:mulXY()
+    fpumf:mul()
     fpumf:pullMBF(@z_real_sq)
 
     // Calculate z_imag_sq = z_imag * z_imag
     fpumf:pushMBF(@z_imag)
     fpumf:dupX()
-    fpumf:mulXY()
+    fpumf:mul()
     fpumf:pullMBF(@z_imag_sq)
 
     // Check for escape: magnitude_sq = z_real_sq + z_imag_sq
     fpumf:pushMBF(@z_real_sq)
     fpumf:pushMBF(@z_imag_sq)
-    fpumf:addXY()
+    fpumf:add()
     fpumf:pullMBF(@magnitude_sq)
 
     // Compare magnitude_sq with 4.0
@@ -275,7 +275,7 @@ def mandelbrotIterate(x, y)#1
     // cmpXY() compares Y vs X, so this compares magnitude_sq vs 4.0
     fpumf:pushMBF(@magnitude_sq)
     fpumf:pushStr("4.0")
-    cmpResult = fpumf:cmpXY()
+    cmpResult = fpumf:cmp()
 
     // DEBUG: Show first iteration of first pixel
     if x == 0 and y == 0 and iter == 0
@@ -291,25 +291,28 @@ def mandelbrotIterate(x, y)#1
     fin
 
     // If magnitude_sq > 4.0, then escaped!
+    // Stack: [magnitude_sq=Y, 4.0=X]
+    // RPN question: "Is X < Y?" = "Is 4.0 < magnitude_sq?"
+    // If magnitude_sq > 4.0: answer is TRUE → returns FPUCMPLT
     if cmpResult == FPUCMPLT
       escaped = TRUE
     else
       // Calculate new z_imag = 2 * z_real * z_imag + c_imag
       fpumf:pushStr("2.0")
       fpumf:pushMBF(@z_real)
-      fpumf:mulXY()
+      fpumf:mul()
       fpumf:pushMBF(@z_imag)
-      fpumf:mulXY()
+      fpumf:mul()
       fpumf:pushMBF(@c_imag)
-      fpumf:addXY()
+      fpumf:add()
       fpumf:pullMBF(@temp_fp)
 
       // Calculate new z_real = z_real_sq - z_imag_sq + c_real
       fpumf:pushMBF(@z_real_sq)
       fpumf:pushMBF(@z_imag_sq)
-      fpumf:subXY()
+      fpumf:sub()
       fpumf:pushMBF(@c_real)
-      fpumf:addXY()
+      fpumf:add()
       fpumf:pullMBF(@z_real)
 
       // Move temp to z_imag
@@ -321,6 +324,15 @@ def mandelbrotIterate(x, y)#1
   loop
 
   // Return iteration count (0 if in set, iter if escaped)
+  // DEBUG: Show final result
+  if x == 0 and y == 0
+    puts("  FINAL: escaped=")
+    puti(escaped)
+    puts(" iter=")
+    puti(iter)
+    putln
+  fin
+
   if escaped
     return iter
   else
@@ -429,146 +441,167 @@ def testSinglePixel#0
   word zero
   byte escaped
   word cmpResult  // Must be word to compare with FPUCMPLT constants
+  word i
 
   puts("\n=== SINGLE PIXEL CALCULATION TEST ===\n")
-  puts("Testing pixel (0, 0) -> c = (-2.5, -1.0)\n")
+  puts("Running test 5 times to verify consistency\n")
   putln
 
-  // Set up c for pixel (0, 0)
-  screenToReal(0)
-  screenToImag(0)
+  // Run test 5 times
+  for i = 1 to 5
+    puts("--- Run #")
+    puti(i)
+    puts(" ---\n")
+    puts("Testing pixel (5, 5)\n")
+    putln
 
-  puts("c_real = ")
-  fpumf:pushMBF(@c_real)
-  fpumf:pullStr(@fpStrBuffer, 3, 6, 0)
-  puts(@fpStrBuffer)
-  putln
+    // Set up c for pixel (5, 5)
+    screenToReal(5)
+    screenToImag(5)
 
-  puts("c_imag = ")
-  fpumf:pushMBF(@c_imag)
-  fpumf:pullStr(@fpStrBuffer, 3, 6, 0)
-  puts(@fpStrBuffer)
-  putln
+    puts("c_real = ")
+    fpumf:pushMBF(@c_real)
+    fpumf:pullStr(@fpStrBuffer, 3, 6, 0)
+    puts(@fpStrBuffer)
+    putln
 
-  puts("max_iter = ")
-  puti(settings.max_iter)
-  putln
-  putln
+    puts("c_imag = ")
+    fpumf:pushMBF(@c_imag)
+    fpumf:pullStr(@fpStrBuffer, 3, 6, 0)
+    puts(@fpStrBuffer)
+    putln
 
-  // Initialize z = 0 + 0i
-  zero = 0
-  fpumf:pushInt(@zero)
-  fpumf:pullMBF(@z_real)
-  fpumf:pushInt(@zero)
-  fpumf:pullMBF(@z_imag)
+    puts("max_iter = ")
+    puti(settings.max_iter)
+    putln
+    putln
 
-  iter = 0
-  escaped = FALSE
+    // Initialize z = 0 + 0i
+    zero = 0
+    fpumf:pushInt(@zero)
+    fpumf:pullMBF(@z_real)
+    fpumf:pushInt(@zero)
+    fpumf:pullMBF(@z_imag)
 
-  // Show first 3 iterations in detail
-  while iter < settings.max_iter and not escaped
-    // Calculate z_real_sq = z_real * z_real
-    fpumf:pushMBF(@z_real)
-    fpumf:dupX()
-    fpumf:mulXY()
-    fpumf:pullMBF(@z_real_sq)
+    iter = 0
+    escaped = FALSE
 
-    // Calculate z_imag_sq = z_imag * z_imag
-    fpumf:pushMBF(@z_imag)
-    fpumf:dupX()
-    fpumf:mulXY()
-    fpumf:pullMBF(@z_imag_sq)
-
-    // Check for escape: magnitude_sq = z_real_sq + z_imag_sq
-    fpumf:pushMBF(@z_real_sq)
-    fpumf:pushMBF(@z_imag_sq)
-    fpumf:addXY()
-    fpumf:pullMBF(@magnitude_sq)
-
-    // Compare magnitude_sq with 4.0
-    // Note: First push becomes Y, second push becomes X
-    // cmpXY() compares Y vs X, so this compares magnitude_sq vs 4.0
-    fpumf:pushMBF(@magnitude_sq)
-    fpumf:pushStr("4.0")
-    cmpResult = fpumf:cmpXY()
-
-    // Show details for first 3 iterations
-    if iter < 3
-      puts("Iteration ")
-      puti(iter)
-      puts(":\n")
-
-      puts("  z_real = ")
+    // Show first 3 iterations in detail
+    while iter < settings.max_iter and not escaped
+      // Calculate z_real_sq = z_real * z_real
       fpumf:pushMBF(@z_real)
-      fpumf:pullStr(@fpStrBuffer, 3, 6, 0)
-      puts(@fpStrBuffer)
-      putln
+      fpumf:dupX()
+      fpumf:mul()
+      fpumf:pullMBF(@z_real_sq)
 
-      puts("  z_imag = ")
+      // Calculate z_imag_sq = z_imag * z_imag
       fpumf:pushMBF(@z_imag)
-      fpumf:pullStr(@fpStrBuffer, 3, 6, 0)
-      puts(@fpStrBuffer)
-      putln
+      fpumf:dupX()
+      fpumf:mul()
+      fpumf:pullMBF(@z_imag_sq)
 
-      puts("  |z|^2 = ")
-      fpumf:pushMBF(@magnitude_sq)
-      fpumf:pullStr(@fpStrBuffer, 3, 6, 0)
-      puts(@fpStrBuffer)
-      putln
-
-      puts("  cmpResult = ")
-      puti(cmpResult)
-      puts(" (FPUCMPLT=")
-      puti(FPUCMPLT)
-      puts(")\n")
-
-      if cmpResult == FPUCMPLT
-        puts("  ** ESCAPED **\n")
-      fin
-      putln
-    fin
-
-    // If magnitude_sq > 4.0, then escaped!
-    if cmpResult == FPUCMPLT
-      escaped = TRUE
-    else
-      // Calculate new z_imag = 2 * z_real * z_imag + c_imag
-      fpumf:pushStr("2.0")
-      fpumf:pushMBF(@z_real)
-      fpumf:mulXY()
-      fpumf:pushMBF(@z_imag)
-      fpumf:mulXY()
-      fpumf:pushMBF(@c_imag)
-      fpumf:addXY()
-      fpumf:pullMBF(@temp_fp)
-
-      // Calculate new z_real = z_real_sq - z_imag_sq + c_real
+      // Check for escape: magnitude_sq = z_real_sq + z_imag_sq
       fpumf:pushMBF(@z_real_sq)
       fpumf:pushMBF(@z_imag_sq)
-      fpumf:subXY()
-      fpumf:pushMBF(@c_real)
-      fpumf:addXY()
-      fpumf:pullMBF(@z_real)
+      fpumf:add()
+      fpumf:pullMBF(@magnitude_sq)
 
-      // Move temp to z_imag
-      fpumf:pushMBF(@temp_fp)
-      fpumf:pullMBF(@z_imag)
+      // Compare magnitude_sq with 4.0
+      // Note: First push becomes Y, second push becomes X
+      // cmpXY() compares Y vs X, so this compares magnitude_sq vs 4.0
+      fpumf:pushMBF(@magnitude_sq)
+      fpumf:pushStr("4.0")
+      cmpResult = fpumf:cmp()
 
-      iter++
-    fin
-  loop
+      // Show details for first 3 iterations
+      if iter < 3
+        puts("Iteration ")
+        puti(iter)
+        puts(":\n")
 
-  puts("FINAL RESULT: iter = ")
-  puti(iter)
-  putln
+        puts("  z_real = ")
+        fpumf:pushMBF(@z_real)
+        fpumf:pullStr(@fpStrBuffer, 3, 6, 0)
+        puts(@fpStrBuffer)
+        putln
 
-  if escaped
-    puts("Pixel ESCAPED after ")
+        puts("  z_imag = ")
+        fpumf:pushMBF(@z_imag)
+        fpumf:pullStr(@fpStrBuffer, 3, 6, 0)
+        puts(@fpStrBuffer)
+        putln
+
+        puts("  |z|^2 = ")
+        fpumf:pushMBF(@magnitude_sq)
+        fpumf:pullStr(@fpStrBuffer, 3, 6, 0)
+        puts(@fpStrBuffer)
+        putln
+
+        puts("  cmpResult = ")
+        puti(cmpResult)
+        puts(" (FPUCMPLT=")
+        puti(FPUCMPLT)
+        puts(")\n")
+
+        if cmpResult == FPUCMPLT
+          puts("  ** ESCAPED **\n")
+        fin
+        putln
+      fin
+
+      // If magnitude_sq > 4.0, then escaped!
+      // Stack: [magnitude_sq=Y, 4.0=X]
+      // RPN question: "Is X < Y?" = "Is 4.0 < magnitude_sq?"
+      // If magnitude_sq > 4.0: answer is TRUE → returns FPUCMPLT
+      if cmpResult == FPUCMPLT
+        escaped = TRUE
+      else
+        // Calculate new z_imag = 2 * z_real * z_imag + c_imag
+        fpumf:pushStr("2.0")
+        fpumf:pushMBF(@z_real)
+        fpumf:mul()
+        fpumf:pushMBF(@z_imag)
+        fpumf:mul()
+        fpumf:pushMBF(@c_imag)
+        fpumf:add()
+        fpumf:pullMBF(@temp_fp)
+
+        // Calculate new z_real = z_real_sq - z_imag_sq + c_real
+        fpumf:pushMBF(@z_real_sq)
+        fpumf:pushMBF(@z_imag_sq)
+        fpumf:sub()
+        fpumf:pushMBF(@c_real)
+        fpumf:add()
+        fpumf:pullMBF(@z_real)
+
+        // Move temp to z_imag
+        fpumf:pushMBF(@temp_fp)
+        fpumf:pullMBF(@z_imag)
+
+        iter++
+      fin
+    loop
+
+    puts("FINAL RESULT: iter = ")
     puti(iter)
-    puts(" iterations\n")
-  else
-    puts("Pixel IN SET (did not escape)\n")
-  fin
+    putln
+
+    if escaped
+      puts("Pixel ESCAPED after ")
+      puti(iter)
+      puts(" iterations\n")
+    else
+      puts("Pixel IN SET (did not escape)\n")
+    fin
+
+    // Wait for keypress between runs (except after last run)
+    if i < 5
+      putln
+      puts("Press any key for next test run...\n")
+      getc()
+      putln
+    fin
+  next
 
   putln
   puts("Press any key to continue to render...\n")
@@ -750,7 +783,7 @@ def validateSettings#1
   // Check real_min < real_max
   fpumf:pushStr(@settings.real_min)
   fpumf:pushStr(@settings.real_max)
-  cmpResult = fpumf:cmpXY()
+  cmpResult = fpumf:cmp()
   if cmpResult == FPUCMPGT or cmpResult == FPUCMPEQ
     puts("\nError: Real min must be < Real max\n")
     return FALSE
@@ -759,7 +792,7 @@ def validateSettings#1
   // Check imag_min < imag_max
   fpumf:pushStr(@settings.imag_min)
   fpumf:pushStr(@settings.imag_max)
-  cmpResult = fpumf:cmpXY()
+  cmpResult = fpumf:cmp()
   if cmpResult == FPUCMPGT or cmpResult == FPUCMPEQ
     puts("\nError: Imag min must be < Imag max\n")
     return FALSE
@@ -774,28 +807,28 @@ def validateSettings#1
   // Reasonable range checks
   fpumf:pushStr(@settings.real_min)
   fpumf:pushStr("-10.0")
-  cmpResult = fpumf:cmpXY()
+  cmpResult = fpumf:cmp()
   if cmpResult == FPUCMPLT
     strcpy(@settings.real_min, "-10.0")
   fin
 
   fpumf:pushStr(@settings.real_max)
   fpumf:pushStr("10.0")
-  cmpResult = fpumf:cmpXY()
+  cmpResult = fpumf:cmp()
   if cmpResult == FPUCMPGT
     strcpy(@settings.real_max, "10.0")
   fin
 
   fpumf:pushStr(@settings.imag_min)
   fpumf:pushStr("-10.0")
-  cmpResult = fpumf:cmpXY()
+  cmpResult = fpumf:cmp()
   if cmpResult == FPUCMPLT
     strcpy(@settings.imag_min, "-10.0")
   fin
 
   fpumf:pushStr(@settings.imag_max)
   fpumf:pushStr("10.0")
-  cmpResult = fpumf:cmpXY()
+  cmpResult = fpumf:cmp()
   if cmpResult == FPUCMPGT
     strcpy(@settings.imag_max, "10.0")
   fin
@@ -988,11 +1021,11 @@ def handleTabKey#1
         // Recalculate ranges
         fpumf:pushStr(@settings.real_max)
         fpumf:pushStr(@settings.real_min)
-        fpumf:subXY()
+        fpumf:sub()
         fpumf:pullMBF(@real_range)
         fpumf:pushStr(@settings.imag_max)
         fpumf:pushStr(@settings.imag_min)
-        fpumf:subXY()
+        fpumf:sub()
         fpumf:pullMBF(@imag_range)
         displaySettings
         // Return TRUE to trigger re-render
@@ -1330,11 +1363,11 @@ def main#0
             // Recalculate ranges
             fpumf:pushStr(@settings.real_max)
             fpumf:pushStr(@settings.real_min)
-            fpumf:subXY()
+            fpumf:sub()
             fpumf:pullMBF(@real_range)
             fpumf:pushStr(@settings.imag_max)
             fpumf:pushStr(@settings.imag_min)
-            fpumf:subXY()
+            fpumf:sub()
             fpumf:pullMBF(@imag_range)
 
             needsRender = TRUE

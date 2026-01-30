@@ -1,0 +1,31 @@
+//
+// Test program to verify MF_CMD_FMUL value
+//
+include "inc/cmdsys.plh"
+include "inc/conio.plh"
+include "inc/mgafl.plh"
+
+def main#0
+    puts("MF_CMD_FMUL constant test\n")
+    puts("MF_CMD_FMUL = ")
+    puti(MF_CMD_FMUL)
+    puts(" (should be 49 decimal, 0x31 hex)\n")
+
+    puts("MF_CMD_FADD = ")
+    puti(MF_CMD_FADD)
+    puts(" (should be 48 decimal, 0x30 hex)\n")
+
+    puts("\nDirect hardware test:\n")
+    puts("Writing 0x31 to MF_CMDREG ($C0C0)...\n")
+    ^MF_CMDREG = $31
+
+    puts("Reading MF_STATUSREG...\n")
+    puti(^MF_STATUSREG)
+    putln
+
+    puts("\nPress any key...")
+    getc
+end
+
+main()
+done

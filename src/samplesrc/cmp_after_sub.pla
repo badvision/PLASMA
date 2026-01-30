@@ -1,0 +1,85 @@
+//
+// Test cmp() AFTER running sub() tests - mimics fptest_mf exactly
+//
+include "inc/cmdsys.plh"
+include "inc/fileio.plh"
+include "inc/fpstr.plh"
+include "inc/conio.plh"
+include "inc/fpumf.plh"
+
+byte[80] strBuf
+byte[7] reg0buf
+byte[7] reg1buf
+
+def printFP(label)#0
+    fpumf:pullStr(@strBuf, 1, 8, FPSTR_FIXED)
+    puts(label)
+    puts(@strBuf)
+    putln
+end
+
+def showBothRegs#0
+    fpumf:storMBF(@reg0buf, 0)
+    fpumf:storMBF(@reg1buf, 1)
+    puts("  [0]: ")
+    puth(reg0buf.0)
+    puts(" ")
+    puth(reg0buf.5)
+    puts(" [1]: ")
+    puth(reg1buf.0)
+    puts(" ")
+    puth(reg1buf.5)
+    putln
+end
+
+def main#0
+    word result
+
+    fpumf:reset()
+
+    puts("\n=== CMP After SUB Tests ===\n")
+
+    // Run testSubtract-like operations
+    puts("\n1. Test sub() operations:\n")
+    puts("  10.0 - 3.0 = ")
+    fpumf:pushStr("10.0")
+    fpumf:pushStr("3.0")
+    fpumf:sub()
+    printFP("")
+
+    puts("  5.0 - 8.0 = ")
+    fpumf:pushStr("5.0")
+    fpumf:pushStr("8.0")
+    fpumf:sub()
+    printFP("")
+
+    puts("  4.0 - 4.0 = ")
+    fpumf:pushStr("4.0")
+    fpumf:pushStr("4.0")
+    fpumf:sub()
+    printFP("")
+
+    // Reset like fptest_mf does
+    puts("\n2. Calling reset()...\n")
+    fpumf:reset()
+    showBothRegs()
+
+    // Now do the compare test
+    puts("\n3. After pushStr(6.0) #1:\n")
+    fpumf:pushStr("6.0")
+    showBothRegs()
+
+    puts("\n4. After pushStr(6.0) #2:\n")
+    fpumf:pushStr("6.0")
+    showBothRegs()
+
+    puts("\n5. Calling cmp()...\n")
+    result = fpumf:cmp()
+
+    puts("\nResult: ")
+    puth(result)
+    putln
+end
+
+main
+done

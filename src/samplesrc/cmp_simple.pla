@@ -1,0 +1,38 @@
+//
+// Minimal cmp() test - parseable output
+//
+include "inc/cmdsys.plh"
+include "inc/fpumf.plh"
+
+def test(label, x, y, expected)#0
+    word result
+
+    fpumf:pushStr(x)
+    fpumf:pushStr(y)
+    result = fpumf:cmp()
+
+    puts(label)
+    puts(":")
+    puth(result)
+    puts(":")
+    puth(expected)
+    puts(":")
+    if result == expected
+        puts("PASS")
+    else
+        puts("FAIL")
+    fin
+    putln
+end
+
+def main#0
+    fpumf:reset()
+
+    test("10vs5", "10.0", "5.0", $4040)  // GT
+    test("3vs7",  "3.0",  "7.0",  $8080)  // LT
+    test("6vs6",  "6.0",  "6.0",  $0002)  // EQ
+    test("0vs4",  "0.0",  "4.0",  $4040)  // GT
+end
+
+main
+done

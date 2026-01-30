@@ -1,0 +1,71 @@
+//
+// Simple test: Does sub() work at all?
+//
+include "inc/cmdsys.plh"
+include "inc/fpumf.plh"
+
+def main#0
+    byte[7] mbfbuf
+    byte i
+
+    puts("\n=== Testing sub() directly ===\n")
+
+    fpumf:reset()
+
+    // Test 1: 5 - 3 = 2 (should be positive)
+    puts("\nTest 1: 5 - 3 (expect positive)\n")
+    fpumf:pushInt(5)
+    fpumf:pushInt(3)
+    fpumf:sub()
+    fpumf:pullMBF(@mbfbuf)
+    puts("  Result bytes:")
+    for i = 0 to 6
+        puts(" ")
+        puth(mbfbuf[i])
+    next
+    putln
+    puts("  Exp (byte 0): ")
+    puth(mbfbuf.0)
+    puts(", Sign (byte 5): ")
+    puth(mbfbuf.5)
+    putln
+
+    // Test 2: 3 - 5 = -2 (should be negative)
+    puts("\nTest 2: 3 - 5 (expect negative)\n")
+    fpumf:pushInt(3)
+    fpumf:pushInt(5)
+    fpumf:sub()
+    fpumf:pullMBF(@mbfbuf)
+    puts("  Result bytes:")
+    for i = 0 to 6
+        puts(" ")
+        puth(mbfbuf[i])
+    next
+    putln
+    puts("  Exp (byte 0): ")
+    puth(mbfbuf.0)
+    puts(", Sign (byte 5): ")
+    puth(mbfbuf.5)
+    putln
+
+    // Test 3: 5 - 5 = 0 (should be zero)
+    puts("\nTest 3: 5 - 5 (expect zero)\n")
+    fpumf:pushInt(5)
+    fpumf:pushInt(5)
+    fpumf:sub()
+    fpumf:pullMBF(@mbfbuf)
+    puts("  Result bytes:")
+    for i = 0 to 6
+        puts(" ")
+        puth(mbfbuf[i])
+    next
+    putln
+    puts("  Exp (byte 0): ")
+    puth(mbfbuf.0)
+    puts(", Sign (byte 5): ")
+    puth(mbfbuf.5)
+    putln
+end
+
+main
+done

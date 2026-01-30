@@ -1,0 +1,98 @@
+//
+// Test FPU comparison to verify FPUCMPGT behavior
+//
+include "inc/cmdsys.plh"
+include "inc/fpu.plh"
+
+sysflags restxt1|restxt2|resxtxt1|resxtxt2
+
+def testCompare#0
+  word result
+  byte[32] buffer
+
+  puts("=== FPU COMPARISON TEST ===\n")
+  putln
+
+  // Test 1: 5.0 > 4.0 (should be GT)
+  puts("Test: 5.0 > 4.0\n")
+  fpu:pushStr("5.0")
+  fpu:pushStr("4.0")
+  result = fpu:cmpXY()
+  puts("  Result = $")
+  puth(result >> 8)
+  puth(result)
+  puts(" (expected $4040 for GT)\n")
+  if result == FPUCMPGT
+    puts("  CORRECT: Got FPUCMPGT\n")
+  else
+    puts("  ERROR: Did not get FPUCMPGT\n")
+  fin
+  putln
+
+  // Test 2: 4.0 < 5.0 (should be LT)
+  puts("Test: 4.0 < 5.0\n")
+  fpu:pushStr("4.0")
+  fpu:pushStr("5.0")
+  result = fpu:cmpXY()
+  puts("  Result = $")
+  puth(result >> 8)
+  puth(result)
+  puts(" (expected $8080 for LT)\n")
+  if result == FPUCMPLT
+    puts("  CORRECT: Got FPUCMPLT\n")
+  else
+    puts("  ERROR: Did not get FPUCMPLT\n")
+  fin
+  putln
+
+  // Test 3: 4.0 == 4.0 (should be EQ)
+  puts("Test: 4.0 == 4.0\n")
+  fpu:pushStr("4.0")
+  fpu:pushStr("4.0")
+  result = fpu:cmpXY()
+  puts("  Result = $")
+  puth(result >> 8)
+  puth(result)
+  puts(" (expected $0002 for EQ)\n")
+  if result == FPUCMPEQ
+    puts("  CORRECT: Got FPUCMPEQ\n")
+  else
+    puts("  ERROR: Did not get FPUCMPEQ\n")
+  fin
+  putln
+
+  // Test 4: Simulate escape check - 4.5 > 4.0
+  puts("Test: 4.5 > 4.0 (simulate escape)\n")
+  fpu:pushStr("4.5")
+  fpu:pushStr("4.0")
+  result = fpu:cmpXY()
+  puts("  Result = $")
+  puth(result >> 8)
+  puth(result)
+  puts(" (expected $4040 for GT)\n")
+  if result == FPUCMPGT
+    puts("  CORRECT: Would escape\n")
+  else
+    puts("  ERROR: Would NOT escape (BUG!)\n")
+  fin
+  putln
+
+  // Test 5: Simulate no escape - 3.5 < 4.0
+  puts("Test: 3.5 < 4.0 (simulate no escape)\n")
+  fpu:pushStr("3.5")
+  fpu:pushStr("4.0")
+  result = fpu:cmpXY()
+  puts("  Result = $")
+  puth(result >> 8)
+  puth(result)
+  puts(" (expected $8080 for LT)\n")
+  if result == FPUCMPLT
+    puts("  CORRECT: Would NOT escape\n")
+  else
+    puts("  ERROR: Would escape (BUG!)\n")
+  fin
+  putln
+end
+
+testCompare
+done

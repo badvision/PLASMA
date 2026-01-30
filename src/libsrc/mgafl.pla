@@ -1,0 +1,15 @@
+//
+// MegaFlash Hardware Module Stub
+// This is a minimal stub module that allows programs to import megaflash
+// All actual MegaFlash functionality is implemented in hardware or fpu_mf.pla
+//
+include "inc/cmdsys.plh"
+
+//
+// Export empty module API
+// MegaFlash constants are defined in inc/megaflash.plh
+// No functions are exported because all operations are hardware-based
+//
+export word mgafl = 0  // Dummy export to make module valid
+
+done

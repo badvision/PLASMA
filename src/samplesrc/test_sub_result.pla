@@ -1,0 +1,87 @@
+//
+// Test what sub() actually writes to stackRegs[0]
+// Examine the actual MBF bytes after subtraction
+//
+include "inc/cmdsys.plh"
+include "inc/fpumf.plh"
+
+def dumpMBF(label, pMBF)#0
+    byte i
+
+    puts(label)
+    puts(": ")
+
+    for i = 0 to 6
+        puth(pMBF->[i])
+        puts(" ")
+    next
+    putln
+end
+
+def testSubResult(xStr, yStr)#0
+    byte i
+    byte[7] resultMBF
+
+    puts("\n=== Test: ")
+    puts(yStr)
+    puts(" - ")
+    puts(xStr)
+    puts(" ===\n")
+
+    // Reset FPU
+    fpumf:reset()
+
+    // Push X then Y (so stack has Y at [0] and X at [1])
+    fpumf:pushStr(xStr)
+    fpumf:pushStr(yStr)
+
+    // Call sub() which should compute Y - X and store in stackRegs[0]
+    fpumf:sub()
+
+    // Extract result from top of stack (register 0)
+    fpumf:storMBF(@resultMBF, 0)
+
+    // Dump all 7 bytes
+    puts("Result bytes: ")
+    for i = 0 to 6
+        puth(resultMBF.[i])
+        puts(" ")
+    next
+    putln
+
+    // Specifically check the key bytes
+    puts("  Exponent (byte 0): $")
+    puth(resultMBF.0)
+    putln
+
+    puts("  Sign (byte 5): $")
+    puth(resultMBF.5)
+    putln
+
+    // Check if zero
+    if resultMBF.0 == 0
+        puts("  -> Zero (FPUCMPEQ expected)\n")
+    elsif resultMBF.5 & $80
+        puts("  -> Negative (FPUCMPLT expected)\n")
+    else
+        puts("  -> Positive (FPUCMPGT expected)\n")
+    fin
+end
+
+def main#0
+    puts("=== Testing sub() Results ===\n")
+
+    // Test 1: 10.0 - 5.0 should give positive result
+    testSubResult("5.0", "10.0")
+
+    // Test 2: 3.0 - 7.0 should give negative result
+    testSubResult("7.0", "3.0")
+
+    // Test 3: 6.0 - 6.0 should give zero
+    testSubResult("6.0", "6.0")
+
+    puts("\nDone.\n")
+end
+
+main
+done

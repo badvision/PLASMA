@@ -1,0 +1,121 @@
+Initializing JavaFX toolkit for headless operation...
+Jan 29, 2026 11:11:18 PM com.sun.javafx.application.PlatformImpl startup
+WARNING: Unsupported JavaFX configuration: classes were loaded from 'unnamed module @234d3a41'
+JavaFX toolkit initialized
+Switched to Main mode
+Available commands:
+  monitor/m       - Enter Monitor mode (includes debugger functionality)
+  assembler/a     - Enter Assembler mode
+  qq              - Exit terminal
+
+  swlog (sl)     - Toggle softswitch state change logging
+  swstate (ss)   - Display current state of all softswitches
+  reset (re)     - Reset the Apple II
+  step (s) [count] - Step the CPU for count cycles (default: 1)
+  run (g) [count] - Run the CPU for count cycles or until breakpoint (default: 1000000)
+  insertdisk (id) d# - Insert disk image in drive # (1 or 2)
+  ejectdisk (ed) d# - Eject disk from drive # (1 or 2)
+  loadbin (lb) file addr - Load binary file at specified address (hex)
+  savebin (sb) file addr size - Save binary data from memory to file
+  help/?          - Show this help
+  help/?  <cmd>   - Show detailed help for a specific command
+  exit/quit       - Exit the Terminal
+Emulator initialized in command-line focused mode
+Jace Emulator Terminal
+Type ? for help, exit to quit
+JACE>Jan 29, 2026 11:11:18 PM jace.terminal.MainMode insertDisk
+INFO: Disk insertion requested for drive d1: /Users/brobert/Documents/code/PLASMA/PLEIADES-MEGAFLASH-FPU.po
+Disk insertion not yet implemented
+JACE>Jan 29, 2026 11:11:18 PM jace.terminal.MainMode processCommand
+INFO: Unknown command received: sleep
+Unknown command: sleep 1
+JACE>Typing string: "\n"
+Jan 29, 2026 11:11:18 PM jace.terminal.MainMode processStringInput
+INFO: Simulating string input: \n
+Jan 29, 2026 11:11:18 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 13
+Jan 29, 2026 11:11:19 PM jace.core.SoundMixer lambda$initSound$2
+INFO: Sound system initialized successfully
+Key pressed: $0D
+JACE>Jan 29, 2026 11:11:19 PM jace.terminal.MainMode processCommand
+INFO: Unknown command received: sleep
+Unknown command: sleep 3
+JACE>Typing string: "-/SYS/FPUMF_AUTO_TEST\n"
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode processStringInput
+INFO: Simulating string input: -/SYS/FPUMF_AUTO_TEST\n
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 45
+Key pressed: $2D ('-')
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 47
+Key pressed: $2F ('/')
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 83
+Key pressed: $53 ('S')
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 89
+Key pressed: $59 ('Y')
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 83
+Key pressed: $53 ('S')
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 47
+Key pressed: $2F ('/')
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 70
+Key pressed: $46 ('F')
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 80
+Key pressed: $50 ('P')
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 85
+Key pressed: $55 ('U')
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 77
+Key pressed: $4D ('M')
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 70
+Key pressed: $46 ('F')
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 95
+Key pressed: $5F ('_')
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 65
+Key pressed: $41 ('A')
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 85
+Key pressed: $55 ('U')
+Jan 29, 2026 11:11:19 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 84
+Key pressed: $54 ('T')
+Jan 29, 2026 11:11:20 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 79
+Key pressed: $4F ('O')
+Jan 29, 2026 11:11:20 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 95
+Key pressed: $5F ('_')
+Jan 29, 2026 11:11:20 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 84
+Key pressed: $54 ('T')
+Jan 29, 2026 11:11:20 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 69
+Key pressed: $45 ('E')
+Jan 29, 2026 11:11:20 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 83
+Key pressed: $53 ('S')
+Jan 29, 2026 11:11:20 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 84
+Key pressed: $54 ('T')
+Jan 29, 2026 11:11:20 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 13
+Key pressed: $0D
+JACE>Jan 29, 2026 11:11:20 PM jace.terminal.MainMode processCommand
+INFO: Unknown command received: sleep
+Unknown command: sleep 20
+JACE>Typing string: "\n"
+Jan 29, 2026 11:11:20 PM jace.terminal.MainMode processStringInput
+INFO: Simulating string input: \n
+Jan 29, 2026 11:11:20 PM jace.terminal.MainMode simulateKeypressInternal
+INFO: Simulating keypress with code: 13
+Key pressed: $0D
+JACE>Exiting Terminal

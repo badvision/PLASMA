@@ -1,0 +1,45 @@
+//
+// Simple test to verify MBF conversion fix
+//
+include "inc/cmdsys.plh"
+include "inc/fpumf.plh"
+include "inc/conio.plh"
+
+byte[20] strBuf
+
+def main
+    puts("\nTesting MBF conversion fix\n")
+    puts("===========================\n\n")
+
+    // Test with 2.0
+    puts("Test 1: pushStr(\"2.0\")\n")
+    fpumf:pushStr("2.0")
+    fpumf:pullStr(@strBuf, 1, 8, 0)
+    puts("Result: ")
+    puts(@strBuf)
+    putln
+
+    // Test with 3.14159
+    puts("\nTest 2: pushStr(\"3.14159\")\n")
+    fpumf:pushStr("3.14159")
+    fpumf:pullStr(@strBuf, 1, 8, 0)
+    puts("Result: ")
+    puts(@strBuf)
+    putln
+
+    // Test multiplication: 2.0 * 3.0 = 6.0
+    puts("\nTest 3: 2.0 * 3.0\n")
+    fpumf:pushStr("2.0")
+    fpumf:pushStr("3.0")
+    fpumf:mulXY()
+    fpumf:pullStr(@strBuf, 1, 8, 0)
+    puts("Result: ")
+    puts(@strBuf)
+    putln
+    puts("(expected: 6.0)\n")
+
+    puts("\nAll tests complete!\n")
+end
+
+main()
+done

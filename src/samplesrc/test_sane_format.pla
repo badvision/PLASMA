@@ -1,0 +1,92 @@
+//
+// Test SANE Extended Format Byte Layout
+//
+include "inc/cmdsys.plh"
+include "inc/fpstr.plh"
+include "inc/conio.plh"
+
+// Import MegaFlash FPU library
+include "inc/fpumf.plh"
+
+byte[10] extValue
+byte[80] strBuf
+
+//
+// Print hex bytes of extended value
+//
+def printExtBytes(label)#0
+    byte i
+
+    puts(label)
+    puts(": ")
+
+    for i = 0 to 9
+        if extValue[i] < 16
+            putc('0')
+        fin
+        puth(extValue[i])
+        putc(' ')
+    next
+    putln
+end
+
+//
+// Main program
+//
+def main#0
+    byte i
+    word resetResult
+
+    puts("\nSANE Extended Format Test\n")
+    puts("==========================\n\n")
+
+    // Initialize FPU
+    resetResult = fpumf:reset()
+    if resetResult
+        puts("ERROR: Failed to initialize FPU\n")
+        return
+    fin
+
+    // Test 1: Load a simple value (PI)
+    puts("Test 1: PI constant\n")
+    fpumf:constPi()
+    fpumf:pullExt(@extValue)
+    printExtBytes("PI bytes")
+    fpumf:pushExt(@extValue)
+    fpumf:pullStr(@strBuf, 1, 8, FPSTR_FIXED)
+    puts("PI value: ")
+    puts(@strBuf)
+    putln
+    putln
+
+    // Test 2: Load a simple integer
+    puts("Test 2: Integer 42\n")
+    fpumf:pushStr("42.0")
+    fpumf:pullExt(@extValue)
+    printExtBytes("42.0 bytes")
+    fpumf:pushExt(@extValue)
+    fpumf:pullStr(@strBuf, 1, 8, FPSTR_FIXED)
+    puts("42.0 value: ")
+    puts(@strBuf)
+    putln
+    putln
+
+    // Test 3: Small value
+    puts("Test 3: Small value 0.5\n")
+    fpumf:pushStr("0.5")
+    fpumf:pullExt(@extValue)
+    printExtBytes("0.5 bytes")
+    fpumf:pushExt(@extValue)
+    fpumf:pullStr(@strBuf, 1, 8, FPSTR_FIXED)
+    puts("0.5 value: ")
+    puts(@strBuf)
+    putln
+    putln
+
+    puts("\nPress any key to exit...")
+    getc()
+end
+
+// Run the main program
+main()
+done

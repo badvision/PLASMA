@@ -1,0 +1,65 @@
+//
+// Minimal cmp test - shows ONLY the critical diagnostic
+//
+include "inc/cmdsys.plh"
+include "inc/fpumf.plh"
+
+byte[7] reg0buf
+byte[7] reg1buf
+
+def showStack#0
+    // Save stack registers to buffers
+    fpumf:storMBF(@reg0buf, 0)
+    fpumf:storMBF(@reg1buf, 1)
+
+    puts("  [0]: exp=")
+    puth(reg0buf.0)
+    puts(" sgn=")
+    puth(reg0buf.5)
+
+    puts(" [1]: exp=")
+    puth(reg1buf.0)
+    puts(" sgn=")
+    puth(reg1buf.5)
+    putln
+end
+
+def main#0
+    word result
+
+    fpumf:reset()
+
+    puts("\n=== Minimal CMP Test ===\n")
+
+    // Test: Push 6.0 twice, check stack BEFORE cmp()
+    puts("\n1. Push 6.0, 6.0\n")
+    fpumf:pushStr("6.0")
+    fpumf:pushStr("6.0")
+
+    puts("Stack BEFORE cmp():\n")
+    showStack()
+
+    // Now call cmp()
+    result = fpumf:cmp()
+
+    puts("Result: ")
+    puth(result)
+    puts("\n")
+
+    // Test: Push 10.0, 5.0 for comparison
+    puts("\n2. Push 10.0, 5.0\n")
+    fpumf:pushStr("10.0")
+    fpumf:pushStr("5.0")
+
+    puts("Stack BEFORE cmp():\n")
+    showStack()
+
+    result = fpumf:cmp()
+
+    puts("Result: ")
+    puth(result)
+    puts("\n")
+end
+
+main
+done

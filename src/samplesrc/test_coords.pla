@@ -1,0 +1,193 @@
+//
+// Test coordinate mapping functions in isolation
+//
+include "inc/cmdsys.plh"
+include "inc/fpu.plh"
+include "inc/fpstr.plh"
+
+const SCREEN_WIDTH  = 140
+const SCREEN_HEIGHT = 192
+
+byte real_min[10]
+byte real_max[10]
+byte imag_min[10]
+byte imag_max[10]
+byte real_range[10]
+byte imag_range[10]
+byte c_real[10]
+byte c_imag[10]
+byte[32] tmpStr
+
+//
+// Initialize bounds
+//
+def initBounds#0
+  puts("Initializing bounds...\n")
+
+  // Set real_min = -2.5
+  fpu:pushStr("-2.5")
+  fpu:pullExt(@real_min)
+
+  // Set real_max = 1.0
+  fpu:pushStr("1.0")
+  fpu:pullExt(@real_max)
+
+  // Set imag_min = -1.0
+  fpu:pushStr("-1.0")
+  fpu:pullExt(@imag_min)
+
+  // Set imag_max = 1.0
+  fpu:pushStr("1.0")
+  fpu:pullExt(@imag_max)
+
+  // Calculate real_range = real_max - real_min
+  fpu:pushExt(@real_max)
+  fpu:pushExt(@real_min)
+  fpu:subXY()
+  fpu:pullExt(@real_range)
+
+  // Calculate imag_range = imag_max - imag_min
+  fpu:pushExt(@imag_max)
+  fpu:pushExt(@imag_min)
+  fpu:subXY()
+  fpu:pullExt(@imag_range)
+
+  // Display results
+  puts("real_min = ")
+  ext2str(@real_min, @tmpStr, 3, 6, FPSTR_FIXED)
+  puts(@tmpStr)
+  putln
+
+  puts("real_max = ")
+  ext2str(@real_max, @tmpStr, 3, 6, FPSTR_FIXED)
+  puts(@tmpStr)
+  putln
+
+  puts("real_range = ")
+  ext2str(@real_range, @tmpStr, 3, 6, FPSTR_FIXED)
+  puts(@tmpStr)
+  putln
+
+  puts("imag_min = ")
+  ext2str(@imag_min, @tmpStr, 3, 6, FPSTR_FIXED)
+  puts(@tmpStr)
+  putln
+
+  puts("imag_max = ")
+  ext2str(@imag_max, @tmpStr, 3, 6, FPSTR_FIXED)
+  puts(@tmpStr)
+  putln
+
+  puts("imag_range = ")
+  ext2str(@imag_range, @tmpStr, 3, 6, FPSTR_FIXED)
+  puts(@tmpStr)
+  putln
+end
+
+//
+// Test coordinate mapping
+//
+def testMapping(screen_x, screen_y)#0
+  word temp_width
+  word temp_height
+
+  puts("\nTesting screen coordinates (")
+  puti(screen_x)
+  puts(", ")
+  puti(screen_y)
+  puts("):\n")
+
+  // Calculate c_real = real_min + (screen_x / SCREEN_WIDTH) * real_range
+  puts("Step 1: Push screen_x = "); puti(screen_x); putln
+  fpu:pushInt(@screen_x)
+
+  puts("Step 2: Push SCREEN_WIDTH = "); puti(SCREEN_WIDTH); putln
+  temp_width = SCREEN_WIDTH
+  fpu:pushInt(@temp_width)
+
+  puts("Step 3: Divide\n")
+  fpu:divXY()
+
+  // Check division result
+  fpu:pullExt(@c_real)
+  puts("  Division result = ")
+  ext2str(@c_real, @tmpStr, 3, 6, FPSTR_FIXED)
+  puts(@tmpStr)
+  putln
+  fpu:pushExt(@c_real)
+
+  puts("Step 4: Push real_range = ")
+  ext2str(@real_range, @tmpStr, 3, 6, FPSTR_FIXED)
+  puts(@tmpStr)
+  putln
+  fpu:pushExt(@real_range)
+
+  puts("Step 5: Multiply\n")
+  fpu:mulXY()
+
+  // Check multiply result
+  fpu:pullExt(@c_real)
+  puts("  Multiply result = ")
+  ext2str(@c_real, @tmpStr, 3, 6, FPSTR_FIXED)
+  puts(@tmpStr)
+  putln
+  fpu:pushExt(@c_real)
+
+  puts("Step 6: Push real_min = ")
+  ext2str(@real_min, @tmpStr, 3, 6, FPSTR_FIXED)
+  puts(@tmpStr)
+  putln
+  fpu:pushExt(@real_min)
+
+  puts("Step 7: Add\n")
+  fpu:addXY()
+
+  puts("Step 8: Store result\n")
+  fpu:pullExt(@c_real)
+
+  puts("FINAL c_real = ")
+  ext2str(@c_real, @tmpStr, 3, 6, FPSTR_FIXED)
+  puts(@tmpStr)
+  putln
+
+  // Similar for c_imag
+  puts("\nCalculating c_imag...\n")
+  fpu:pushInt(@screen_y)
+  temp_height = SCREEN_HEIGHT
+  fpu:pushInt(@temp_height)
+  fpu:divXY()
+  fpu:pushExt(@imag_range)
+  fpu:mulXY()
+  fpu:pushExt(@imag_min)
+  fpu:addXY()
+  fpu:pullExt(@c_imag)
+
+  puts("FINAL c_imag = ")
+  ext2str(@c_imag, @tmpStr, 3, 6, FPSTR_FIXED)
+  puts(@tmpStr)
+  putln
+end
+
+//
+// Main
+//
+def main#0
+  puts("=== Coordinate Mapping Test ===\n\n")
+
+  // Initialize FPU
+  fpu:reset()
+
+  // Initialize bounds
+  initBounds()
+
+  // Test first pixel (0, 0) - should map to (-2.5, -1.0)
+  testMapping(0, 0)
+
+  // Test another pixel
+  testMapping(70, 96)
+
+  puts("\nTest complete.\n")
+end
+
+main
+done

@@ -46,16 +46,22 @@ INT32TEST  = rel/INT32TEST\#FE1000
 SANE       = rel/SANE\#FE1000
 FPSTR      = rel/FPSTR\#FE1000
 FPU        = rel/FPU\#FE1000
-FPU_MF     = rel/FPU_MF\#FE1000
+FPUMF      = rel/FPUMF\#FE1000
+MGAFL      = rel/MGAFL\#FE1000
 SNDSEQ     = rel/apple/SNDSEQ\#FE1000
 PLAYSEQ    = rel/apple/PLAYSEQ\#FE1000
 PLAYPCM    = rel/apple/PLAYPCM\#FE1000
 SANITY     = rel/SANITY\#FE1000
 RPNCALC    = rel/RPNCALC\#FE1000
-RPNCALC    = rel/RPNCALC_MF\#FE1000
+RPNCALC_MF = rel/RPNCALC_MF\#FE1000
+FPTEST_MF  = rel/FPTEST_MF\#FE1000
+MANDEL     = rel/MANDEL\#FE1000
+MANDEL_MF  = rel/MANDEL_MF\#FE1000
+MCORE_MF   = rel/MCORE_MF\#FE1000
 LZ4        = rel/LZ4\#FE1000
 LZ4CAT     = rel/LZ4CAT\#FE1000
 MOUSE      = rel/apple/MOUSE\#FE1000
+MOUSETEST  = rel/apple/MOUSETEST\#FE1000
 UTHERNET2  = rel/apple/UTHERNET2\#FE1000
 UTHERNET   = rel/apple/UTHERNET\#FE1000
 ETHERIP    = rel/ETHERIP\#FE1000
@@ -129,19 +135,27 @@ apple: $(PLVMZP_APL) $(PLASM) $(PLVM) $(PLVM01) $(PLVM02) $(PLVMJIT) $(PLVM802) 
 $(CMD) $(CMDJIT) $(JIT) $(JIT16) $(JITUNE) $(SOSCMD) $(SOSCMDJIT) $(PLASMAPLASM) $(CODEOPT) $(PLFORTH) \
 $(HRFORTH) $(HR2FORTH) $(TX2FORTH) $(SEXPR) $(SMATH) $(DRAWL) $(ZIPCHIP) $(MATCHFILES) $(ARGS) $(MEMMGR) \
 $(MEMTEST) $(FIBER) $(FIBERTEST) $(LONGJMP) $(ED) $(MON) $(COPY) $(DEL) $(REN) $(CAT) $(NEWDIR) $(TYPE) \
-$(INITSLOT) $(SOS) $(ROD) $(SIEVE) $(PRIMEGAP) $(MOUSE) $(UTHERNET2) $(UTHERNET) $(ETHERIP) $(INET) $(DHCP) \
+$(INITSLOT) $(SOS) $(ROD) $(SIEVE) $(PRIMEGAP) $(MOUSE) $(MOUSETEST) $(UTHERNET2) $(UTHERNET) $(ETHERIP) $(INET) $(DHCP) \
 $(HTTPD) $(TFTPD) $(ROGUE) $(ROGUEMAP) $(ROGUECOMBAT) $(SFM) $(SFMSPRT) $(GRAFIX) $(GFXDEMO) $(LINES) $(TURTLE) \
 $(SINCOS) $(HGRTILE) $(HGRFONT) $(HGRSPRITE) $(HGRLIB) $(TILETEST) $(HGRTEST) $(GRLIB) $(DGRLIB) $(VBLANK) \
 $(GRTEST) $(DGRTEST) $(MAZE) $(FILEIO_APL) $(CONIO_APL) $(JOYBUZZ) $(PORTIO) $(SPIPORT) \
-$(SDFAT) $(FATCAT) $(FATGET) $(FATPUT) $(FATWDSK) $(FATRDSK) $(INT32) $(INT32TEST) $(SANE) $(FPSTR) $(FPU) $(FPU_MF) $(SANITY) \
-$(LZ4) $(LZ4CAT) $(RPNCALC) $(SNDSEQ) $(PLAYSEQ) $(PLAYPCM) $(CONIOTEST)
+$(SDFAT) $(FATCAT) $(FATGET) $(FATPUT) $(FATWDSK) $(FATRDSK) $(INT32) $(INT32TEST) $(SANE) $(FPSTR) $(FPU) $(FPUMF) $(MGAFL) $(SANITY) \
+$(LZ4) $(LZ4CAT) $(RPNCALC) $(RPNCALC_MF) $(FPTEST_MF) $(MANDEL) $(MANDEL_MF) $(MCORE_MF) $(SNDSEQ) $(PLAYSEQ) $(PLAYPCM) $(CONIOTEST)
 
 	-rm vmsrc/plvmzp.inc
 
 c64: $(PLVMZP_C64) $(PLASM) $(PLVM) $(PLVMC64)
 	-rm vmsrc/plvmzp.inc
 
-all: apple c64
+# Fix DOS/Windows line endings (CRLF) to Unix (LF) before compilation
+# The PLASMA compiler requires Unix line endings
+.PHONY: fix-line-endings
+fix-line-endings:
+	@echo "Fixing line endings in .pla files..."
+	@find . -name "*.pla" -type f -exec sh -c 'tr -d "\r" < "$$1" > "$$1.tmp" && mv "$$1.tmp" "$$1"' _ {} \;
+	@echo "Line endings fixed."
+
+all: fix-line-endings apple c64
 
 clean:
 	-rm *FE1000 *FF2000 $(PLASM) $(PLVM) $(PLVM01) $(PLVM02) $(PLVMJIT) $(PLVM03)
@@ -388,9 +402,13 @@ $(FPU): libsrc/fpu.pla $(PLVM02) $(PLASM)
 	./$(PLASM) -AMOW libsrc/fpu.pla
 	acme --setpc 4094 -o $(FPU) libsrc/fpu.a
 
-$(FPU_MF): libsrc/fpu_mf.pla $(PLVM02) $(PLASM)
-	./$(PLASM) -AMOW libsrc/fpu_mf.pla
-	acme --setpc 4094 -o $(FPU) libsrc/fpu_mf.a
+$(FPUMF): libsrc/fpumf.pla $(PLVM02) $(PLASM)
+	./$(PLASM) -AMOW libsrc/fpumf.pla
+	acme --setpc 4094 -o $(FPUMF) libsrc/fpumf.a
+
+$(MGAFL): libsrc/mgafl.pla $(PLVM02) $(PLASM)
+	./$(PLASM) -AMOW libsrc/mgafl.pla
+	acme --setpc 4094 -o $(MGAFL) libsrc/mgafl.a
 
 $(SANITY): samplesrc/sanity.pla $(PLVM02) $(PLASM)
 	./$(PLASM) -AMOW samplesrc/sanity.pla
@@ -404,9 +422,25 @@ $(RPNCALC): samplesrc/rpncalc.pla libsrc/fpu.pla inc/fpu.plh libsrc/fpstr.pla in
 	./$(PLASM) -AMOW samplesrc/rpncalc.pla
 	acme --setpc 4094 -o $(RPNCALC) samplesrc/rpncalc.a
 
-$(RPNCALC_MF): samplesrc/rpncalc.pla libsrc/fpu_mf.pla inc/fpu.plh libsrc/fpstr.pla inc/fpstr.plh inc/conio.plh $(PLVM02) $(PLASM)
+$(RPNCALC_MF): samplesrc/rpncalc.pla libsrc/fpumf.pla inc/fpumf.plh libsrc/fpstr.pla inc/fpstr.plh inc/conio.plh $(PLVM02) $(PLASM)
 	./$(PLASM) -AMOW samplesrc/rpncalc.pla
 	acme --setpc 4094 -o $(RPNCALC_MF) samplesrc/rpncalc.a
+
+$(FPTEST_MF): samplesrc/fptest_mf.pla libsrc/fpumf.pla inc/fpumf.plh libsrc/fpstr.pla inc/fpstr.plh inc/conio.plh $(PLVM02) $(PLASM)
+	./$(PLASM) -AMOW samplesrc/fptest_mf.pla
+	acme --setpc 4094 -o $(FPTEST_MF) samplesrc/fptest_mf.a
+
+$(MANDEL): samplesrc/mandel.pla libsrc/fpu.pla inc/fpu.plh libsrc/apple/dgrlib.pla inc/dgrlib.plh libsrc/apple/mouse.pla inc/mouse.plh $(PLVM02) $(PLASM)
+	./$(PLASM) -AMOW samplesrc/mandel.pla
+	acme --setpc 4094 -o $(MANDEL) samplesrc/mandel.a
+
+$(MANDEL_MF): samplesrc/mandel_mf.pla libsrc/fpumf.pla inc/fpumf.plh libsrc/apple/dgrlib.pla inc/dgrlib.plh libsrc/apple/mouse.pla inc/mouse.plh $(PLVM02) $(PLASM)
+	./$(PLASM) -AMOW samplesrc/mandel_mf.pla
+	acme --setpc 4094 -o $(MANDEL_MF) samplesrc/mandel_mf.a
+
+$(MCORE_MF): samplesrc/mcore_mf.pla libsrc/fpumf.pla inc/fpumf.plh libsrc/apple/dgrlib.pla inc/dgrlib.plh $(PLVM02) $(PLASM)
+	./$(PLASM) -AMOW samplesrc/mcore_mf.pla
+	acme --setpc 4094 -o $(MCORE_MF) samplesrc/mcore_mf.a
 
 $(ETHERIP): libsrc/etherip.pla $(PLVM02) $(PLASM)
 	./$(PLASM) -AMOW libsrc/etherip.pla
@@ -431,6 +465,10 @@ $(TFTPD): utilsrc/tftpd.pla $(PLVM02) $(PLASM)
 $(MOUSE): libsrc/apple/mouse.pla $(PLVM02) $(PLASM)
 	./$(PLASM) -AMOW libsrc/apple/mouse.pla
 	acme --setpc 4094 -o $(MOUSE) libsrc/apple/mouse.a
+
+$(MOUSETEST): samplesrc/mousetest.pla $(MOUSE) $(PLASM)
+	./$(PLASM) -AMOW samplesrc/mousetest.pla
+	acme --setpc 4094 -o $(MOUSETEST) samplesrc/mousetest.a
 
 $(UTHERNET): libsrc/apple/uthernet.pla $(PLVM02) $(PLASM)
 	./$(PLASM) -AMOW libsrc/apple/uthernet.pla

@@ -1,0 +1,55 @@
+//
+// cmp() Diagnostic Test - Writes results to memory for inspection
+//
+include "inc/cmdsys.plh"
+include "inc/fpumf.plh"
+include "inc/conio.plh"
+
+// Fixed diagnostic buffer at a known address
+word[32] diagBuffer
+
+def main#0
+    word i
+    word cmpResult
+
+    // Initialize FPU
+    fpumf:reset()
+
+    puts("=== CMP DIAGNOSTIC TEST ===\n")
+    puts("Writing results to memory...\n")
+
+    // Test 1: 10.0 vs 5.0 (should return FPUCMPGT = 0x4040)
+    fpumf:pushStr("10.0")
+    fpumf:pushStr("5.0")
+    cmpResult = fpumf:cmp()
+
+    diagBuffer[0] = $DEAD  // Marker
+    diagBuffer[1] = cmpResult
+    diagBuffer[2] = fpumf:getStackReg(0)  // stackRegs[0] address
+    diagBuffer[3] = ^(diagBuffer[2])      // byte at stackRegs[0]
+
+    // Test 2: 3.0 vs 7.0 (should return FPUCMPLT = 0x8080)
+    fpumf:pushStr("3.0")
+    fpumf:pushStr("7.0")
+    cmpResult = fpumf:cmp()
+
+    diagBuffer[4] = $BEEF  // Marker
+    diagBuffer[5] = cmpResult
+
+    // Test 3: 6.0 vs 6.0 (should return FPUCMPEQ = 0x0002)
+    fpumf:pushStr("6.0")
+    fpumf:pushStr("6.0")
+    cmpResult = fpumf:cmp()
+
+    diagBuffer[6] = $CAFE  // Marker
+    diagBuffer[7] = cmpResult
+
+    puts("Done! Diagnostic buffer at: ")
+    puth(@diagBuffer)
+    puts("\n")
+    puts("Press any key...\n")
+    conio:getkey()
+end
+
+main
+done

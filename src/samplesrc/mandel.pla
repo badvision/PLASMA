@@ -1,0 +1,1357 @@
+//
+// Mandelbrot Set Renderer for Apple II
+// Double Hi-Res Graphics (560x192 resolution)
+// Dual-build: MANDEL (SANE FPU) and MANDEL_MF (MegaFlash FPU)
+//
+include "inc/cmdsys.plh"
+include "inc/fpu.plh"
+include "inc/lines.plh"
+include "dhgr.tk/inc/dhgrlib.plh"
+include "dhgr.tk/inc/dhgrutils.plh"
+include "inc/conio.plh"
+include "inc/fpstr.plh"
+include "inc/mouse.plh"
+
+sysflags resxtxt1|reshgr1|resxhgr1    // Reserve extended text and DHGR pages
+
+//
+// Settings structure
+//
+struc t_mandel_settings
+  byte[10] real_min    // 80-bit FP: minimum real value
+  byte[10] real_max    // 80-bit FP: maximum real value
+  byte[10] imag_min    // 80-bit FP: minimum imaginary value
+  byte[10] imag_max    // 80-bit FP: maximum imaginary value
+  word max_iter        // Maximum iterations
+end
+
+//
+// Screen dimensions
+// Note: DHGR color mode uses 140x192 color pixels (each color pixel = 4 DHGR pixels)
+//
+const SCREEN_WIDTH  = 140  // Color pixels (dcgrPixel coordinates)
+const SCREEN_HEIGHT = 192
+
+//
+// Global settings
+//
+byte[t_mandel_settings] settings
+
+//
+// FPU working registers for complex arithmetic
+//
+byte c_real[10]
+byte c_imag[10]
+byte z_real[10]
+byte z_imag[10]
+byte z_real_sq[10]
+byte z_imag_sq[10]
+byte magnitude_sq[10]
+byte real_range[10]
+byte imag_range[10]
+byte temp_fp[10]
+
+//
+// Settings editor state
+//
+const FIELD_REAL_MIN = 0
+const FIELD_REAL_MAX = 1
+const FIELD_IMAG_MIN = 2
+const FIELD_IMAG_MAX = 3
+const FIELD_ITERATIONS = 4
+const NUM_FIELDS = 5
+
+byte currentField = FIELD_REAL_MIN
+byte editMode = FALSE
+byte settingsVisible = FALSE
+
+//
+// String buffers for display
+//
+byte[32] editBuffer
+byte[32] realMinStr
+byte[32] realMaxStr
+byte[32] imagMinStr
+byte[32] imagMaxStr
+byte[16] iterStr
+
+//
+// Global string buffer for FP to string conversion (shared across functions)
+//
+byte[20] fpStrBuffer  // 20 bytes is plenty for "-2.500000" format
+
+//
+// Mouse state structure
+//
+struc t_mouseState
+    byte hasMouseHardware    // TRUE if mouse detected, FALSE otherwise
+    byte buttonDown          // TRUE if button currently down
+    byte dragging            // TRUE if currently dragging zoom box
+    word startX              // Starting X coordinate of zoom box
+    word startY              // Starting Y coordinate of zoom box
+    word currentX            // Current X coordinate
+    word currentY            // Current Y coordinate
+    word lastX               // Last drawn X for XOR cleanup
+    word lastY               // Last drawn Y for XOR cleanup
+end
+
+// Global mouse state
+byte[t_mouseState] mouseState
+
+//============================================================================
+// CORE RENDERING ENGINE
+//============================================================================
+
+//
+// Initialize default settings
+// Default view: real [-2.5, 1.0], imag [-1.0, 1.0]
+//
+def initSettings#0
+  // Set real_min = -2.5
+  fpu:pushStr("-2.5")
+  fpu:pullExt(@settings.real_min)
+
+  // Set real_max = 1.0
+  fpu:pushStr("1.0")
+  fpu:pullExt(@settings.real_max)
+
+  // Set imag_min = -1.0
+  fpu:pushStr("-1.0")
+  fpu:pullExt(@settings.imag_min)
+
+  // Set imag_max = 1.0
+  fpu:pushStr("1.0")
+  fpu:pullExt(@settings.imag_max)
+
+  // Set max iterations (16 for fast testing)
+  settings.max_iter = 16
+
+  // Calculate ranges for coordinate mapping
+  // real_range = real_max - real_min
+  fpu:pushExt(@settings.real_max)
+  fpu:pushExt(@settings.real_min)
+  fpu:subXY()
+  fpu:pullExt(@real_range)
+
+  // imag_range = imag_max - imag_min
+  fpu:pushExt(@settings.imag_max)
+  fpu:pushExt(@settings.imag_min)
+  fpu:subXY()
+  fpu:pullExt(@imag_range)
+end
+
+//
+// Map screen X coordinate to complex plane real value
+// Input: screen_x (word on stack)
+// Output: Stores result in c_real
+//
+def screenToReal(screen_x)#0
+  word temp_width
+  // c_real = real_min + (screen_x / SCREEN_WIDTH) * real_range
+
+  // Push screen_x and convert to FP
+  fpu:pushInt(@screen_x)
+
+  // Push SCREEN_WIDTH and convert to FP (constant, need temp variable)
+  temp_width = SCREEN_WIDTH
+  fpu:pushInt(@temp_width)
+
+  // Divide: screen_x / SCREEN_WIDTH
+  fpu:divXY()
+
+  // Multiply by real_range
+  fpu:pushExt(@real_range)
+  fpu:mulXY()
+
+  // Add real_min
+  fpu:pushExt(@settings.real_min)
+  fpu:addXY()
+
+  // Store in c_real
+  fpu:pullExt(@c_real)
+end
+
+//
+// Map screen Y coordinate to complex plane imaginary value
+// Input: screen_y (word on stack)
+// Output: Stores result in c_imag
+//
+def screenToImag(screen_y)#0
+  word temp_height
+  // c_imag = imag_min + (screen_y / SCREEN_HEIGHT) * imag_range
+
+  // Push screen_y and convert to FP
+  fpu:pushInt(@screen_y)
+
+  // Push SCREEN_HEIGHT and convert to FP
+  temp_height = SCREEN_HEIGHT
+  fpu:pushInt(@temp_height)
+
+  // Divide: screen_y / SCREEN_HEIGHT
+  fpu:divXY()
+
+  // Multiply by imag_range
+  fpu:pushExt(@imag_range)
+  fpu:mulXY()
+
+  // Add imag_min
+  fpu:pushExt(@settings.imag_min)
+  fpu:addXY()
+
+  // Store in c_imag
+  fpu:pullExt(@c_imag)
+end
+
+//
+// Map screen coordinates to complex plane
+// This is the missing function that Agent 3's mouse code needs
+//
+def screenToComplex(px, py, pSettings, pReal, pImag)#0
+  screenToReal(px)
+  fpu:pullExt(pReal)
+  screenToImag(py)
+  fpu:pullExt(pImag)
+end
+
+//
+// Calculate Mandelbrot iteration count for a given complex point
+// Input: c_real and c_imag are already set, x and y for visual feedback
+// Output: Returns iteration count (0 = in set, >0 = escaped)
+//
+def mandelbrotIterate(x, y)#1
+  word iter
+  word escaped
+  word zero
+  word cmpResult
+
+  // DEBUG: Show first pixel's values
+  if x == 0 and y == 0
+    puts("DEBUG FIRST PIXEL (0,0):\n")
+    puts("  c_real = ")
+    fpu:pushExt(@c_real)
+    fpu:pullStr(@fpStrBuffer, 3, 6, 0)
+    puts(@fpStrBuffer)
+    putln
+    puts("  c_imag = ")
+    fpu:pushExt(@c_imag)
+    fpu:pullStr(@fpStrBuffer, 3, 6, 0)
+    puts(@fpStrBuffer)
+    putln
+    puts("  max_iter = ")
+    puti(settings.max_iter)
+    putln
+  fin
+
+  // Initialize z = 0 + 0i
+  zero = 0
+  fpu:pushInt(@zero)
+  fpu:pullExt(@z_real)
+  fpu:pushInt(@zero)
+  fpu:pullExt(@z_imag)
+
+  iter = 0
+  escaped = FALSE
+
+  // Iteration loop
+  while iter < settings.max_iter and not escaped
+    // Calculate z_real_sq = z_real * z_real
+    fpu:pushExt(@z_real)
+    fpu:dupX()
+    fpu:mulXY()
+    fpu:pullExt(@z_real_sq)
+
+    // Calculate z_imag_sq = z_imag * z_imag
+    fpu:pushExt(@z_imag)
+    fpu:dupX()
+    fpu:mulXY()
+    fpu:pullExt(@z_imag_sq)
+
+    // Check for escape: magnitude_sq = z_real_sq + z_imag_sq
+    fpu:pushExt(@z_real_sq)
+    fpu:pushExt(@z_imag_sq)
+    fpu:addXY()
+    fpu:pullExt(@magnitude_sq)
+
+    // Compare magnitude_sq with 4.0
+    // Note: pushes are X=4.0, Y=magnitude_sq, so we compare 4.0 < magnitude_sq
+    fpu:pushExt(@magnitude_sq)
+    fpu:pushStr("4.0")
+    cmpResult = fpu:cmpXY()
+
+    // DEBUG: Show first iteration of first pixel
+    if x == 0 and y == 0 and iter == 0
+      puts("  First iteration:\n")
+      puts("    magnitude_sq = ")
+      fpu:pushExt(@magnitude_sq)
+      fpu:pullStr(@fpStrBuffer, 3, 6, 0)
+      puts(@fpStrBuffer)
+      putln
+      puts("    cmp result = ")
+      puti(cmpResult)
+      putln
+    fin
+
+    // If 4.0 < magnitude_sq, then magnitude_sq > 4.0 (escaped!)
+    if cmpResult == FPUCMPLT
+      escaped = TRUE
+    else
+      // Calculate new z_imag = 2 * z_real * z_imag + c_imag
+      fpu:pushStr("2.0")
+      fpu:pushExt(@z_real)
+      fpu:mulXY()
+      fpu:pushExt(@z_imag)
+      fpu:mulXY()
+      fpu:pushExt(@c_imag)
+      fpu:addXY()
+      fpu:pullExt(@temp_fp)
+
+      // Calculate new z_real = z_real_sq - z_imag_sq + c_real
+      fpu:pushExt(@z_real_sq)
+      fpu:pushExt(@z_imag_sq)
+      fpu:subXY()
+      fpu:pushExt(@c_real)
+      fpu:addXY()
+      fpu:pullExt(@z_real)
+
+      // Move temp to z_imag
+      fpu:pushExt(@temp_fp)
+      fpu:pullExt(@z_imag)
+
+      iter++
+    fin
+  loop
+
+  // Return iteration count (0 if in set, iter if escaped)
+  if escaped
+    return iter
+  else
+    return 0
+  fin
+  return 0  // Fallback (should never reach here)
+end
+
+//
+// Map iteration count to color
+// Color formula: color = (iterations mod 15) + 1 for escaped points
+//                color = 0 for points in the set
+//
+def iterToColor(iter)#1
+  if iter == 0
+    return 0  // Black for points in the set
+  else
+    return (iter % 15) + 1  // Colors 1-15 for escaped points
+  fin
+  return 0  // Fallback (should never reach here)
+end
+
+//
+// Render a single pixel at screen coordinates
+//
+def renderPixel(x, y)#0
+  word iter
+  byte color
+
+  // Draw red dot at current position for visual feedback
+  dcgrColor(CLR_MAGENTA)
+  dcgrPixel(x, y)
+
+  // Map screen coordinates to complex plane
+  screenToReal(x)
+  screenToImag(y)
+
+  // Calculate iteration count
+  iter = mandelbrotIterate(x, y)
+
+  // Map iteration to color
+  color = iterToColor(iter)
+
+  // Plot the pixel with final color
+  dcgrColor(color)
+  dcgrPixel(x, y)
+end
+
+//
+// Test coordinate mapping at key screen positions (TEXT MODE)
+//
+def testCoordinates#0
+  puts("=== COORDINATE MAPPING TEST ===\n")
+  putln
+
+  puts("Expected mapping:\n")
+  puts("  Top-left (0, 0) -> real=-2.5, imag=-1.0\n")
+  puts("  Top-right (139, 0) -> real=1.0, imag=-1.0\n")
+  putln
+
+  puts("Actual mapping:\n")
+
+  // Test (0, 0) - top-left
+  puts("Pixel (0, 0):\n")
+  screenToReal(0)
+  puts("  c_real = ")
+  fpu:pushExt(@c_real)
+  fpu:pullStr(@fpStrBuffer, 3, 6, 0)
+  puts(@fpStrBuffer)
+  putln
+
+  screenToImag(0)
+  puts("  c_imag = ")
+  fpu:pushExt(@c_imag)
+  fpu:pullStr(@fpStrBuffer, 3, 6, 0)
+  puts(@fpStrBuffer)
+  putln
+  putln
+
+  // Test (139, 0) - top-right
+  puts("Pixel (139, 0):\n")
+  screenToReal(139)
+  puts("  c_real = ")
+  fpu:pushExt(@c_real)
+  fpu:pullStr(@fpStrBuffer, 3, 6, 0)
+  puts(@fpStrBuffer)
+  putln
+
+  screenToImag(0)
+  puts("  c_imag = ")
+  fpu:pushExt(@c_imag)
+  fpu:pullStr(@fpStrBuffer, 3, 6, 0)
+  puts(@fpStrBuffer)
+  putln
+  putln
+
+  puts("Press any key to continue to single pixel test...\n")
+  getc()
+end
+
+//
+// Test a single pixel calculation with detailed output
+//
+def testSinglePixel#0
+  word iter
+  word zero
+  byte escaped
+  word cmpResult  // Must be word to compare with FPUCMPLT constants
+
+  puts("\n=== SINGLE PIXEL CALCULATION TEST ===\n")
+  puts("Testing pixel (0, 0) -> c = (-2.5, -1.0)\n")
+  putln
+
+  // Set up c for pixel (0, 0)
+  screenToReal(0)
+  screenToImag(0)
+
+  puts("c_real = ")
+  fpu:pushExt(@c_real)
+  fpu:pullStr(@fpStrBuffer, 3, 6, 0)
+  puts(@fpStrBuffer)
+  putln
+
+  puts("c_imag = ")
+  fpu:pushExt(@c_imag)
+  fpu:pullStr(@fpStrBuffer, 3, 6, 0)
+  puts(@fpStrBuffer)
+  putln
+
+  puts("max_iter = ")
+  puti(settings.max_iter)
+  putln
+  putln
+
+  // Initialize z = 0 + 0i
+  zero = 0
+  fpu:pushInt(@zero)
+  fpu:pullExt(@z_real)
+  fpu:pushInt(@zero)
+  fpu:pullExt(@z_imag)
+
+  iter = 0
+  escaped = FALSE
+
+  // Show first 3 iterations in detail
+  while iter < settings.max_iter and not escaped
+    // Calculate z_real_sq = z_real * z_real
+    fpu:pushExt(@z_real)
+    fpu:dupX()
+    fpu:mulXY()
+    fpu:pullExt(@z_real_sq)
+
+    // Calculate z_imag_sq = z_imag * z_imag
+    fpu:pushExt(@z_imag)
+    fpu:dupX()
+    fpu:mulXY()
+    fpu:pullExt(@z_imag_sq)
+
+    // Check for escape: magnitude_sq = z_real_sq + z_imag_sq
+    fpu:pushExt(@z_real_sq)
+    fpu:pushExt(@z_imag_sq)
+    fpu:addXY()
+    fpu:pullExt(@magnitude_sq)
+
+    // Compare magnitude_sq with 4.0
+    // Note: pushes are X=4.0, Y=magnitude_sq, so we compare 4.0 < magnitude_sq
+    fpu:pushExt(@magnitude_sq)
+    fpu:pushStr("4.0")
+    cmpResult = fpu:cmpXY()
+
+    // Show details for first 3 iterations
+    if iter < 3
+      puts("Iteration ")
+      puti(iter)
+      puts(":\n")
+
+      puts("  z_real = ")
+      fpu:pushExt(@z_real)
+      fpu:pullStr(@fpStrBuffer, 3, 6, 0)
+      puts(@fpStrBuffer)
+      putln
+
+      puts("  z_imag = ")
+      fpu:pushExt(@z_imag)
+      fpu:pullStr(@fpStrBuffer, 3, 6, 0)
+      puts(@fpStrBuffer)
+      putln
+
+      puts("  |z|^2 = ")
+      fpu:pushExt(@magnitude_sq)
+      fpu:pullStr(@fpStrBuffer, 3, 6, 0)
+      puts(@fpStrBuffer)
+      putln
+
+      puts("  cmpResult = ")
+      puti(cmpResult)
+      puts(" (FPUCMPLT=")
+      puti(FPUCMPLT)
+      puts(")\n")
+
+      if cmpResult == FPUCMPLT
+        puts("  ** ESCAPED **\n")
+      fin
+      putln
+    fin
+
+    // If 4.0 < magnitude_sq, then magnitude_sq > 4.0 (escaped!)
+    if cmpResult == FPUCMPLT
+      escaped = TRUE
+    else
+      // Calculate new z_imag = 2 * z_real * z_imag + c_imag
+      fpu:pushStr("2.0")
+      fpu:pushExt(@z_real)
+      fpu:mulXY()
+      fpu:pushExt(@z_imag)
+      fpu:mulXY()
+      fpu:pushExt(@c_imag)
+      fpu:addXY()
+      fpu:pullExt(@temp_fp)
+
+      // Calculate new z_real = z_real_sq - z_imag_sq + c_real
+      fpu:pushExt(@z_real_sq)
+      fpu:pushExt(@z_imag_sq)
+      fpu:subXY()
+      fpu:pushExt(@c_real)
+      fpu:addXY()
+      fpu:pullExt(@z_real)
+
+      // Move temp to z_imag
+      fpu:pushExt(@temp_fp)
+      fpu:pullExt(@z_imag)
+
+      iter++
+    fin
+  loop
+
+  puts("FINAL RESULT: iter = ")
+  puti(iter)
+  putln
+
+  if escaped
+    puts("Pixel ESCAPED after ")
+    puti(iter)
+    puts(" iterations\n")
+  else
+    puts("Pixel IN SET (did not escape)\n")
+  fin
+
+  putln
+  puts("Press any key to continue to render...\n")
+  getc()
+end
+
+//
+// Render the full Mandelbrot set
+//
+def renderMandelbrot#0
+  word x, y
+  byte key
+  // Initialize DHGR graphics mode
+  dhgrMode(DHGR_COLOR_MODE)
+  dhgrSurfScr(OP_SRC)
+  setlinespans(@dcgrHLin, @dcgrVLin)
+  dcgrColor(CLR_BLACK)
+  dhgrClearBl7(0, 0, SCR_WIDTH7, SCR_HEIGHT)
+
+  // Render each pixel
+  for y = 0 to SCREEN_HEIGHT - 1
+    for x = 0 to SCREEN_WIDTH - 1
+      renderPixel(x, y)
+
+      // Check for TAB interrupt every 10 pixels for performance
+      if (x % 10) == 0
+        if conio:keypressed()
+          key = conio:getkey()
+          if key == keytab
+            // TAB pressed - exit rendering to allow settings access
+            dhgrMode(DHGR_TEXT_MODE)
+            return
+          fin
+        fin
+      fin
+    next
+  next
+
+  // Stay in graphics mode to display the result
+  // User can press TAB to access settings or ESC to exit
+end
+
+//============================================================================
+// SETTINGS EDITOR MODULE
+//============================================================================
+
+//
+// Convert string to integer
+//
+def str2int(strptr)#1
+  word result
+  byte i
+  byte digit
+  byte len
+
+  result = 0
+  len = strptr.[0]
+
+  for i = 1 to len
+    digit = strptr.[i] - '0'
+    if digit >= 0 and digit <= 9
+      result = result * 10 + digit
+    fin
+  next
+
+  return result
+end
+
+//
+// Convert integer to string
+//
+def int2str(value, strptr)#0
+  byte digit
+  word divisor
+  word temp
+  byte pos
+  byte started
+
+  pos = 1
+  started = FALSE
+
+  // Handle zero case
+  if value == 0
+    strptr.[1] = '0'
+    strptr.[0] = 1
+    return
+  fin
+
+  // Process digits from highest to lowest
+  divisor = 10000
+  while divisor > 0
+    temp = value / divisor
+    digit = temp % 10
+    if digit <> 0 or started
+      started = TRUE
+      strptr.[pos] = '0' + digit
+      pos++
+    fin
+    divisor = divisor / 10
+  loop
+
+  // Set string length
+  strptr.[0] = pos - 1
+end
+
+//
+// Format settings to string buffers for display
+//
+def formatSettings#0
+  // Format real_min
+  ext2str(@settings.real_min, @realMinStr, 3, 6, FPSTR_FIXED)
+
+  // Format real_max
+  ext2str(@settings.real_max, @realMaxStr, 3, 6, FPSTR_FIXED)
+
+  // Format imag_min
+  ext2str(@settings.imag_min, @imagMinStr, 3, 6, FPSTR_FIXED)
+
+  // Format imag_max
+  ext2str(@settings.imag_max, @imagMaxStr, 3, 6, FPSTR_FIXED)
+
+  // Format iterations
+  int2str(settings.max_iter, @iterStr)
+end
+
+//
+// Display settings overlay at bottom of screen
+//
+def displaySettings#0
+  word row
+
+  if not settingsVisible
+    return
+  fin
+
+  // Format current settings
+  formatSettings
+
+  // Display settings line 1
+  row = 22
+  conio:gotoxy(0, row)
+  puts("Real: [")
+  if currentField == FIELD_REAL_MIN and editMode
+    conio:textctrl(ctrlattr, INVERSE)
+  fin
+  puts(@realMinStr)
+  conio:textctrl(ctrlattr, NORMAL)
+  puts("] to [")
+  if currentField == FIELD_REAL_MAX and editMode
+    conio:textctrl(ctrlattr, INVERSE)
+  fin
+  puts(@realMaxStr)
+  conio:textctrl(ctrlattr, NORMAL)
+  puts("]")
+
+  // Display settings line 2
+  row = 23
+  conio:gotoxy(0, row)
+  puts("Imag: [")
+  if currentField == FIELD_IMAG_MIN and editMode
+    conio:textctrl(ctrlattr, INVERSE)
+  fin
+  puts(@imagMinStr)
+  conio:textctrl(ctrlattr, NORMAL)
+  puts("] to [")
+  if currentField == FIELD_IMAG_MAX and editMode
+    conio:textctrl(ctrlattr, INVERSE)
+  fin
+  puts(@imagMaxStr)
+  conio:textctrl(ctrlattr, NORMAL)
+  puts("]  Iter: ")
+  if currentField == FIELD_ITERATIONS and editMode
+    conio:textctrl(ctrlattr, INVERSE)
+  fin
+  puts(@iterStr)
+  conio:textctrl(ctrlattr, NORMAL)
+end
+
+//
+// Validate settings: min < max for real and imaginary, iterations > 0
+//
+def validateSettings#1
+  word cmpResult
+
+  // Check real_min < real_max
+  fpu:pushExt(@settings.real_min)
+  fpu:pushExt(@settings.real_max)
+  cmpResult = fpu:cmpXY()
+  if cmpResult == FPUCMPGT or cmpResult == FPUCMPEQ
+    puts("\nError: Real min must be < Real max\n")
+    return FALSE
+  fin
+
+  // Check imag_min < imag_max
+  fpu:pushExt(@settings.imag_min)
+  fpu:pushExt(@settings.imag_max)
+  cmpResult = fpu:cmpXY()
+  if cmpResult == FPUCMPGT or cmpResult == FPUCMPEQ
+    puts("\nError: Imag min must be < Imag max\n")
+    return FALSE
+  fin
+
+  // Check iterations > 0
+  if settings.max_iter == 0
+    puts("\nError: Iterations must be > 0\n")
+    return FALSE
+  fin
+
+  // Reasonable range checks
+  fpu:pushExt(@settings.real_min)
+  fpu:pushStr("-10.0")
+  cmpResult = fpu:cmpXY()
+  if cmpResult == FPUCMPLT
+    fpu:pushStr("-10.0")
+    fpu:pullExt(@settings.real_min)
+  fin
+
+  fpu:pushExt(@settings.real_max)
+  fpu:pushStr("10.0")
+  cmpResult = fpu:cmpXY()
+  if cmpResult == FPUCMPGT
+    fpu:pushStr("10.0")
+    fpu:pullExt(@settings.real_max)
+  fin
+
+  fpu:pushExt(@settings.imag_min)
+  fpu:pushStr("-10.0")
+  cmpResult = fpu:cmpXY()
+  if cmpResult == FPUCMPLT
+    fpu:pushStr("-10.0")
+    fpu:pullExt(@settings.imag_min)
+  fin
+
+  fpu:pushExt(@settings.imag_max)
+  fpu:pushStr("10.0")
+  cmpResult = fpu:cmpXY()
+  if cmpResult == FPUCMPGT
+    fpu:pushStr("10.0")
+    fpu:pullExt(@settings.imag_max)
+  fin
+
+  if settings.max_iter > 10000
+    settings.max_iter = 10000
+  fin
+
+  return TRUE
+end
+
+//
+// Get field pointer for editing
+//
+def getFieldPointer(field)#1
+  when field
+    is FIELD_REAL_MIN
+      return @settings.real_min
+    is FIELD_REAL_MAX
+      return @settings.real_max
+    is FIELD_IMAG_MIN
+      return @settings.imag_min
+    is FIELD_IMAG_MAX
+      return @settings.imag_max
+    is FIELD_ITERATIONS
+      return @settings.max_iter
+  wend
+  return 0
+end
+
+//
+// Get field string for editing
+//
+def getFieldString(field)#1
+  when field
+    is FIELD_REAL_MIN
+      return @realMinStr
+    is FIELD_REAL_MAX
+      return @realMaxStr
+    is FIELD_IMAG_MIN
+      return @imagMinStr
+    is FIELD_IMAG_MAX
+      return @imagMaxStr
+    is FIELD_ITERATIONS
+      return @iterStr
+  wend
+  return 0
+end
+
+//
+// Edit current field
+//
+def editCurrentField#0
+  byte key
+  byte cursorPos
+  word strPtr
+  word fieldPtr
+
+  // Get current field string
+  strPtr = getFieldString(currentField)
+  strcpy(@editBuffer, strPtr)
+  cursorPos = ^editBuffer
+
+  // Enter edit mode
+  editMode = TRUE
+  displaySettings
+
+  // Edit loop
+  repeat
+    key = conio:getkey()
+
+    when key
+      is keyenter
+        // Apply changes
+        if currentField == FIELD_ITERATIONS
+          // Parse integer
+          settings.max_iter = str2int(@editBuffer)
+        else
+          // Parse FP
+          fieldPtr = getFieldPointer(currentField)
+          if str2ext(@editBuffer, fieldPtr) == 0
+            // Invalid number
+            puts("\nInvalid number!\n")
+            // Restore original
+            strcpy(@editBuffer, strPtr)
+          fin
+        fin
+        break
+
+      is keyescape
+        // Cancel changes
+        strcpy(@editBuffer, strPtr)
+        break
+
+      is keyarrowleft
+        if cursorPos > 0
+          cursorPos = cursorPos - 1
+        fin
+
+      is keyarrowright
+        if cursorPos < ^editBuffer
+          cursorPos = cursorPos + 1
+        fin
+
+      is keydelete
+      is $08  // Backspace
+        if cursorPos > 0
+          // Remove character at cursorPos-1
+          memcpy(@editBuffer + cursorPos, @editBuffer + cursorPos + 1, ^editBuffer - cursorPos)
+          ^editBuffer = ^editBuffer - 1
+          cursorPos = cursorPos - 1
+          editBuffer[^editBuffer] = 0
+        fin
+
+      otherwise
+        // Printable character
+        if key >= ' ' and key <= '~' and ^editBuffer < 30
+          // Insert character
+          if cursorPos < ^editBuffer
+            memcpy(@editBuffer + cursorPos + 1, @editBuffer + cursorPos, ^editBuffer - cursorPos + 1)
+          fin
+          editBuffer[cursorPos + 1] = key
+          ^editBuffer = ^editBuffer + 1
+          cursorPos = cursorPos + 1
+        fin
+    wend
+
+    // Update display
+    strcpy(strPtr, @editBuffer)
+    displaySettings
+  until FALSE
+
+  editMode = FALSE
+  displaySettings
+end
+
+//
+// Handle TAB key - toggle settings visibility and enter edit mode
+//
+def handleTabKey#1
+  byte key
+
+  // Toggle visibility
+  settingsVisible = not settingsVisible
+
+  if not settingsVisible
+    // Hide settings
+    conio:gotoxy(0, 22)
+    conio:clear(cleol)
+    conio:gotoxy(0, 23)
+    conio:clear(cleol)
+    return FALSE
+  fin
+
+  // Show settings
+  currentField = FIELD_REAL_MIN
+  displaySettings
+
+  // Navigation loop
+  repeat
+    key = conio:getkey()
+
+    when key
+      is keytab
+        // Toggle off
+        settingsVisible = FALSE
+        conio:gotoxy(0, 22)
+        conio:clear(cleol)
+        conio:gotoxy(0, 23)
+        conio:clear(cleol)
+        break
+
+      is keyarrowdown
+        // Next field
+        currentField = (currentField + 1) % NUM_FIELDS
+        displaySettings
+
+      is keyarrowup
+        // Previous field
+        currentField = (currentField + NUM_FIELDS - 1) % NUM_FIELDS
+        displaySettings
+
+      is keyenter
+        // Edit current field
+        editCurrentField
+        // Validate after edit
+        if not validateSettings
+          // Restore defaults on validation failure
+          initSettings
+        fin
+        // Recalculate ranges
+        fpu:pushExt(@settings.real_max)
+        fpu:pushExt(@settings.real_min)
+        fpu:subXY()
+        fpu:pullExt(@real_range)
+        fpu:pushExt(@settings.imag_max)
+        fpu:pushExt(@settings.imag_min)
+        fpu:subXY()
+        fpu:pullExt(@imag_range)
+        displaySettings
+        // Return TRUE to trigger re-render
+        return TRUE
+
+      is keyescape
+        // Exit settings
+        settingsVisible = FALSE
+        conio:gotoxy(0, 22)
+        conio:clear(cleol)
+        conio:gotoxy(0, 23)
+        conio:clear(cleol)
+        break
+
+      is 'R'
+      is 'r'
+        // Reset to defaults
+        initSettings
+        displaySettings
+        return TRUE
+    wend
+  until not settingsVisible
+
+  return FALSE
+end
+
+//============================================================================
+// MOUSE INTEGRATION MODULE
+//============================================================================
+
+//
+// Mouse Detection - Use Mouse module directly (same as mousetest.pla)
+//
+def detectMouse#1
+  // Clamp mouse to text screen coordinates
+  Mouse:clampMouse(0, 39, 0, 23)
+
+  // Enable mouse
+  Mouse:setMouse(MOUSE_ENABLE)
+
+  mouseState.hasMouseHardware = TRUE
+  return TRUE
+end
+
+//
+// Poll Mouse - Read mouse position and button state
+//
+def pollMouse#0
+  byte status
+  word mx, my
+
+  if not mouseState.hasMouseHardware
+    return
+  fin
+
+  // Read mouse state - readMouse returns 3 values: xPos, yPos, status
+  mx, my, status = Mouse:readMouse()#3
+
+  // Update current position
+  mouseState.currentX = mx
+  mouseState.currentY = my
+
+  // Check button state
+  if status & BUTTON_DOWN
+    if not mouseState.buttonDown
+      // Button just pressed - start drag
+      mouseState.buttonDown = TRUE
+      mouseState.dragging = TRUE
+      mouseState.startX = mx
+      mouseState.startY = my
+      mouseState.lastX = mx
+      mouseState.lastY = my
+    fin
+  else
+    if mouseState.buttonDown
+      // Button just released - end drag
+      mouseState.buttonDown = FALSE
+    fin
+  fin
+end
+
+//
+// Draw Zoom Box - XOR drawing for visual feedback
+//
+def drawZoomBox(x1, y1, x2, y2)#0
+  word temp
+
+  // Ensure x1 <= x2 and y1 <= y2
+  if x1 > x2
+    temp = x1
+    x1 = x2
+    x2 = temp
+  fin
+  if y1 > y2
+    temp = y1
+    y1 = y2
+    y2 = temp
+  fin
+
+  // Use white color for XOR visibility
+  dcgrColor(CLR_WHITE)
+
+  // Draw rectangle using horizontal and vertical lines
+  dcgrHLin(x1, x2, y1)  // Top
+  dcgrHLin(x1, x2, y2)  // Bottom
+  dcgrVLin(y1, y2, x1)  // Left
+  dcgrVLin(y1, y2, x2)  // Right
+end
+
+//
+// Clear Last Zoom Box - XOR with last position to clear
+//
+def clearLastZoomBox#0
+  if mouseState.dragging or (mouseState.lastX <> 0 or mouseState.lastY <> 0)
+    drawZoomBox(mouseState.startX, mouseState.startY, mouseState.lastX, mouseState.lastY)
+  fin
+end
+
+//
+// Update Zoom Box - Clear old, draw new
+//
+def updateZoomBox#0
+  if mouseState.dragging
+    // Clear old box by XOR-ing again
+    if mouseState.lastX <> mouseState.currentX or mouseState.lastY <> mouseState.currentY
+      clearLastZoomBox()
+
+      // Draw new box
+      drawZoomBox(mouseState.startX, mouseState.startY, mouseState.currentX, mouseState.currentY)
+
+      // Update last position
+      mouseState.lastX = mouseState.currentX
+      mouseState.lastY = mouseState.currentY
+    fin
+  fin
+end
+
+//
+// Calculate Zoom Bounds - Map screen coords to complex plane
+//
+def calculateZoomBounds(pNewBounds)#0
+  byte realMin[10], imagMin[10], realMax[10], imagMax[10]
+  word x1, y1, x2, y2
+  word temp
+
+  // Get zoom box coordinates (normalized)
+  x1 = mouseState.startX
+  y1 = mouseState.startY
+  x2 = mouseState.lastX
+  y2 = mouseState.lastY
+
+  // Ensure x1 <= x2 and y1 <= y2
+  if x1 > x2
+    temp = x1
+    x1 = x2
+    x2 = temp
+  fin
+  if y1 > y2
+    temp = y1
+    y1 = y2
+    y2 = temp
+  fin
+
+  // Convert top-left corner to complex coordinates
+  screenToComplex(x1, y1, @settings, @realMin, @imagMin)
+
+  // Convert bottom-right corner to complex coordinates
+  screenToComplex(x2, y2, @settings, @realMax, @imagMax)
+
+  // Store new bounds in output structure
+  memcpy(pNewBounds + 0,  @realMin, 10)
+  memcpy(pNewBounds + 10, @realMax, 10)
+  memcpy(pNewBounds + 20, @imagMin, 10)
+  memcpy(pNewBounds + 30, @imagMax, 10)
+end
+
+//
+// Check for Zoom Complete
+//
+def isZoomComplete#1
+  word dx, dy
+
+  // Returns TRUE if user completed a zoom box drag
+  if not mouseState.hasMouseHardware
+    return FALSE
+  fin
+
+  // Check if drag was completed (button released after dragging)
+  if mouseState.buttonDown == FALSE and mouseState.dragging == TRUE
+    // Check if we had a valid drag (moved at least a few pixels)
+    dx = mouseState.lastX - mouseState.startX
+    dy = mouseState.lastY - mouseState.startY
+    if dx < 0
+      dx = -dx
+    fin
+    if dy < 0
+      dy = -dy
+    fin
+    if dx > 10 and dy > 10
+      return TRUE
+    fin
+  fin
+
+  return FALSE
+end
+
+//
+// Reset Mouse State - Prepare for next interaction
+//
+def resetMouseState#0
+  mouseState.buttonDown = FALSE
+  mouseState.dragging = FALSE
+  mouseState.startX = 0
+  mouseState.startY = 0
+  mouseState.lastX = 0
+  mouseState.lastY = 0
+end
+
+//
+// Main Mouse Event Handler
+// Returns TRUE if zoom was completed and render should restart
+//
+def handleMouseEvents(pNewBounds)#1
+  if not mouseState.hasMouseHardware
+    return FALSE
+  fin
+
+  // Poll current mouse state
+  pollMouse()
+
+  // Update zoom box visual feedback
+  updateZoomBox()
+
+  // Check if zoom was completed
+  if isZoomComplete()
+    // Clear the final zoom box
+    clearLastZoomBox()
+
+    // Calculate new coordinate bounds
+    calculateZoomBounds(pNewBounds)
+
+    // Reset for next interaction
+    resetMouseState()
+
+    return TRUE
+  fin
+
+  return FALSE
+end
+
+//
+// Shutdown Mouse
+//
+def shutdownMouse#0
+  if mouseState.hasMouseHardware
+    Mouse:detachMouse()
+  fin
+end
+
+//============================================================================
+// MAIN PROGRAM
+//============================================================================
+
+//
+// Main program
+//
+def main#0
+  byte key
+  byte hasMouse
+  byte needsRender
+  byte[t_mandel_settings] newBounds
+
+  // Initialize FPU
+  fpu:reset()
+
+  // Initialize settings with default view
+  initSettings
+
+  // TEST: Display coordinate mapping before rendering
+  testCoordinates
+
+  // TEST: Single pixel calculation with detailed output
+  testSinglePixel
+
+  // Detect mouse hardware
+  hasMouse = detectMouse()
+
+  // Main loop
+  needsRender = TRUE
+  while TRUE
+    // Render if needed
+    if needsRender
+      renderMandelbrot()
+      needsRender = FALSE
+    fin
+
+    // Event loop - wait for input (in graphics mode)
+    key = conio:getkey()
+
+    when key
+      is keytab
+        // TAB opens settings editor - switch to text mode
+        dhgrMode(DHGR_TEXT_MODE)
+        if handleTabKey()
+          // Settings changed, need to re-render
+          needsRender = TRUE
+        fin
+
+      is keyescape
+        // ESC exits program - switch to text mode
+        dhgrMode(DHGR_TEXT_MODE)
+        break
+
+      otherwise
+        // Check mouse events if mouse detected
+        if hasMouse
+          if handleMouseEvents(@newBounds)
+            // User completed zoom - update settings
+            memcpy(@settings.real_min, @newBounds.real_min, 10)
+            memcpy(@settings.real_max, @newBounds.real_max, 10)
+            memcpy(@settings.imag_min, @newBounds.imag_min, 10)
+            memcpy(@settings.imag_max, @newBounds.imag_max, 10)
+
+            // Recalculate ranges
+            fpu:pushExt(@settings.real_max)
+            fpu:pushExt(@settings.real_min)
+            fpu:subXY()
+            fpu:pullExt(@real_range)
+            fpu:pushExt(@settings.imag_max)
+            fpu:pushExt(@settings.imag_min)
+            fpu:subXY()
+            fpu:pullExt(@imag_range)
+
+            needsRender = TRUE
+          fin
+        fin
+    wend
+  loop
+
+  // Cleanup
+  shutdownMouse()
+
+  // Restore text mode
+  dhgrMode(DHGR_TEXT_MODE)
+end
+
+//
+// Entry point
+//
+main
+done

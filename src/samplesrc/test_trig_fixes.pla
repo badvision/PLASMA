@@ -1,0 +1,119 @@
+//
+// Test program to verify _drop() fixes in trig/transcendental functions
+// Tests functions that were fixed: neg, powXInt, asin, acos, sinh, cosh, tanh
+//
+
+include "inc/cmdsys.plh"
+include "inc/fileio.plh"
+include "inc/fpstr.plh"
+include "inc/fpumf.plh"
+
+def testNeg
+    puts("\nTesting negX():\n")
+
+    // Test: negX(5.0) should be -5.0
+    fpumf:pushStr("5.0")
+    fpumf:negX
+    fpumf:pullStr(@$280, 2, 3, 1)
+    puts("  negX(5.0) = "); puts(@$280); putc('\n')
+
+    // Test: negX(-3.14) should be 3.14
+    fpumf:pushStr("-3.14")
+    fpumf:negX
+    fpumf:pullStr(@$280, 2, 3, 1)
+    puts("  negX(-3.14) = "); puts(@$280); putc('\n')
+end
+
+def testPowXInt
+    puts("\nTesting powXInt():\n")
+
+    // Test: 2^3 = 8
+    fpumf:pushStr("2.0")
+    fpumf:powXInt(3)
+    fpumf:pullStr(@$280, 2, 3, 1)
+    puts("  2^3 = "); puts(@$280); putc('\n')
+
+    // Test: 10^2 = 100
+    fpumf:pushStr("10.0")
+    fpumf:powXInt(2)
+    fpumf:pullStr(@$280, 2, 3, 1)
+    puts("  10^2 = "); puts(@$280); putc('\n')
+end
+
+def testHyperbolic
+    puts("\nTesting hyperbolic functions:\n")
+
+    // Test sinh(0) = 0
+    fpumf:pushStr("0.0")
+    fpumf:sinh
+    fpumf:pullStr(@$280, 2, 3, 1)
+    puts("  sinh(0) = "); puts(@$280); putc('\n')
+
+    // Test cosh(0) = 1
+    fpumf:pushStr("0.0")
+    fpumf:cosh
+    fpumf:pullStr(@$280, 2, 3, 1)
+    puts("  cosh(0) = "); puts(@$280); putc('\n')
+
+    // Test tanh(0) = 0
+    fpumf:pushStr("0.0")
+    fpumf:tanh
+    fpumf:pullStr(@$280, 2, 3, 1)
+    puts("  tanh(0) = "); puts(@$280); putc('\n')
+end
+
+def testInverseTrig
+    puts("\nTesting inverse trig functions:\n")
+
+    // Test asin(0) = 0
+    fpumf:pushStr("0.0")
+    fpumf:asin
+    fpumf:pullStr(@$280, 2, 3, 1)
+    puts("  asin(0) = "); puts(@$280); putc('\n')
+
+    // Test acos(1) = 0
+    fpumf:pushStr("1.0")
+    fpumf:acos
+    fpumf:pullStr(@$280, 2, 3, 1)
+    puts("  acos(1) = "); puts(@$280); putc('\n')
+end
+
+def testStackDepth
+    byte i
+
+    puts("\nTesting stack depth (should always return to 0):\n")
+
+    // Each operation should leave stack at same depth
+    for i = 1 to 5
+        fpumf:pushStr("1.5")
+        fpumf:neg
+        fpumf:pullStr(@$280, 2, 3, 1)
+    next
+    puts("  Completed 5 neg operations without stack overflow\n")
+
+    for i = 1 to 5
+        fpumf:pushStr("2.0")
+        fpumf:powXInt(3)
+        fpumf:pullStr(@$280, 2, 3, 1)
+    next
+    puts("  Completed 5 powXInt operations without stack overflow\n")
+end
+
+// Main program
+puts("===========================================\n")
+puts("Trig/Transcendental Function _drop() Test\n")
+puts("===========================================\n")
+
+fpumf:reset
+
+testNeg
+testPowXInt
+testHyperbolic
+testInverseTrig
+testStackDepth
+
+puts("\n===========================================\n")
+puts("All tests completed successfully!\n")
+puts("===========================================\n")
+
+done

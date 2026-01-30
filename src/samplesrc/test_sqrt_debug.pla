@@ -1,0 +1,35 @@
+//
+// Minimal test to debug sqrt(2.0) result conversion
+//
+include "inc/cmdsys.plh"
+include "inc/fileio.plh"
+include "inc/fpstr.plh"
+include "inc/conio.plh"
+include "inc/fpumf.plh"
+
+byte[80] strBuf
+
+def main#0
+    puts("\n=== MBF-to-Extended Conversion Debug Test ===\n\n")
+
+    // Initialize FPU
+    fpumf:reset()
+
+    // Test sqrt(2.0) - the problematic operation
+    puts("Testing sqrt(2.0)...\n\n")
+    fpumf:pushStr("2.0")
+    fpumf:sqrtX()
+
+    // Pull and display result
+    puts("\nResult: ")
+    fpumf:pullStr(@strBuf, 1, 8, FPSTR_FIXED)
+    puts(@strBuf)
+    putln
+
+    puts("\nExpected: 1.41421356\n")
+    puts("\nPress any key to exit...")
+    getc()
+end
+
+main()
+done

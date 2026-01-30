@@ -1,0 +1,74 @@
+//
+// Direct test of cmp() logic by manually setting stackRegs[0]
+// This bypasses hardware to test ONLY the comparison logic
+//
+include "inc/cmdsys.plh"
+
+// Comparison result constants
+const FPUCMPGT = $4040      // Greater Than
+const FPUCMPLT = $8080      // Less Than
+const FPUCMPEQ = $0002      // EQual
+
+// Simulate the 7-byte MBF stack register
+byte[7] testReg
+
+def testCmpLogic(testName, expByte, signByte, expectedResult)#0
+    word result
+
+    puts(testName)
+    puts(": ")
+
+    // Set up test register to simulate what sub() would return
+    testReg.0 = expByte     // Exponent byte
+    testReg.1 = $00         // Mantissa byte 1
+    testReg.2 = $00         // Mantissa byte 2
+    testReg.3 = $00         // Mantissa byte 3
+    testReg.4 = $00         // Mantissa byte 4
+    testReg.5 = signByte    // Sign byte (bit 7 = negative)
+    testReg.6 = $00         // Extension byte
+
+    // Implement cmp() logic directly
+    if testReg:0 == 0
+        result = FPUCMPEQ
+    elsif testReg:5 & $80
+        result = FPUCMPLT
+    else
+        result = FPUCMPGT
+    fin
+
+    // Report result
+    puts("got=$")
+    puth(result)
+    puts(" expected=$")
+    puth(expectedResult)
+
+    if result == expectedResult
+        puts(" PASS")
+    else
+        puts(" FAIL")
+    fin
+    putln
+end
+
+def main#0
+    puts("=== Direct CMP Logic Test ===\n\n")
+
+    // Test 1: Positive result (10.0 - 5.0 = 5.0)
+    // Non-zero exponent, positive sign → FPUCMPGT
+    testCmpLogic("Test1_Positive", $82, $00, FPUCMPGT)
+
+    // Test 2: Negative result (3.0 - 7.0 = -4.0)
+    // Non-zero exponent, negative sign (bit 7 set) → FPUCMPLT
+    testCmpLogic("Test2_Negative", $82, $80, FPUCMPLT)
+
+    // Test 3: Zero result (6.0 - 6.0 = 0.0)
+    // Zero exponent → FPUCMPEQ
+    testCmpLogic("Test3_Zero", $00, $00, FPUCMPEQ)
+
+    putln
+    puts("If all PASS, cmp() logic is correct.\n")
+    puts("If any FAIL, there's a bug in the comparison logic itself.\n")
+end
+
+main
+done

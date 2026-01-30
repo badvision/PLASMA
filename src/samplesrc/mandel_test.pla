@@ -1,0 +1,490 @@
+//
+// Unit tests for Mandelbrot Set Renderer
+// Tests coordinate mapping and iteration calculations
+//
+include "inc/cmdsys.plh"
+include "inc/fpu.plh"
+include "inc/fpstr.plh"
+
+//
+// Test data structures (mirroring mandel.pla)
+//
+struc t_mandel_settings
+  byte[10] real_min
+  byte[10] real_max
+  byte[10] imag_min
+  byte[10] imag_max
+  word max_iter
+end
+
+//
+// Constants
+//
+const SCREEN_WIDTH  = 560
+const SCREEN_HEIGHT = 192
+
+//
+// Test utilities
+//
+byte test_count
+byte test_passed
+byte test_failed
+
+//
+// Settings: 42 bytes (4*10 bytes for FP + 2 bytes for word)
+//
+word[] settings_data = 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+byte[] real_range = 0,0,0,0,0,0,0,0,0,0
+byte[] imag_range = 0,0,0,0,0,0,0,0,0,0
+byte[] c_real = 0,0,0,0,0,0,0,0,0,0
+byte[] c_imag = 0,0,0,0,0,0,0,0,0,0
+
+def printTestHeader(testname)#0
+  puts("TEST: ")
+  puts(testname)
+  putln
+end
+
+def assertEqual(actual, expected, msg)#0
+  test_count++
+  if actual == expected
+    test_passed++
+    puts("  PASS: ")
+    puts(msg)
+    putln
+  else
+    test_failed++
+    puts("  FAIL: ")
+    puts(msg)
+    puts(" (expected ")
+    puti(expected)
+    puts(", got ")
+    puti(actual)
+    puts(")")
+    putln
+  fin
+end
+
+def assertFloatNear(actual_addr, expected_str, tolerance_str, msg)#0
+  byte[32] actual_str
+  byte[32] diff_str
+  word cmp_result
+
+  test_count++
+
+  // Convert actual to string for comparison
+  ext2str(actual_addr, @actual_str, 15, 10, FPSTR_FIXED|FPSTR_FLEX)
+
+  // Calculate difference: actual - expected
+  fpu:pushExt(actual_addr)
+  fpu:pushStr(expected_str)
+  fpu:subXY()
+
+  // Take absolute value
+  fpu:absX()
+
+  // Compare with tolerance
+  fpu:pushStr(tolerance_str)
+  cmp_result = fpu:cmpXY()
+
+  if cmp_result == FPUCMPLT or cmp_result == FPUCMPEQ
+    test_passed++
+    puts("  PASS: ")
+    puts(msg)
+    puts(" (")
+    puts(@actual_str)
+    puts(")")
+    putln
+  else
+    test_failed++
+    puts("  FAIL: ")
+    puts(msg)
+    puts(" (expected ~")
+    puts(expected_str)
+    puts(", got ")
+    puts(@actual_str)
+    puts(")")
+    putln
+  fin
+
+  // Clean up FPU stack
+  fpu:dropX()
+end
+
+def printTestSummary#0
+  putln
+  puts("============================================================")
+  putln
+  puts("TEST SUMMARY:")
+  putln
+  puts("  Total:  "); puti(test_count); putln
+  puts("  Passed: "); puti(test_passed); putln
+  puts("  Failed: "); puti(test_failed); putln
+  putln
+  if test_failed == 0
+    puts("ALL TESTS PASSED!")
+  else
+    puts("SOME TESTS FAILED!")
+  fin
+  putln
+  puts("============================================================")
+  putln
+end
+
+//
+// Setup test environment
+//
+def setupTestSettings#0
+  word real_min_addr
+  word real_max_addr
+  word imag_min_addr
+  word imag_max_addr
+
+  real_min_addr = @settings_data
+  real_max_addr = real_min_addr + 10
+  imag_min_addr = real_max_addr + 10
+  imag_max_addr = imag_min_addr + 10
+
+  // Set real_min = -2.5
+  fpu:pushStr("-2.5")
+  fpu:pullExt(real_min_addr)
+
+  // Set real_max = 1.0
+  fpu:pushStr("1.0")
+  fpu:pullExt(real_max_addr)
+
+  // Set imag_min = -1.0
+  fpu:pushStr("-1.0")
+  fpu:pullExt(imag_min_addr)
+
+  // Set imag_max = 1.0
+  fpu:pushStr("1.0")
+  fpu:pullExt(imag_max_addr)
+
+  // Calculate ranges
+  fpu:pushExt(real_max_addr)
+  fpu:pushExt(real_min_addr)
+  fpu:subXY()
+  fpu:pullExt(@real_range)
+
+  fpu:pushExt(imag_max_addr)
+  fpu:pushExt(imag_min_addr)
+  fpu:subXY()
+  fpu:pullExt(@imag_range)
+end
+
+//
+// Test: Coordinate Mapping - Real Axis
+//
+def testScreenToReal#0
+  printTestHeader("Coordinate Mapping: Screen X to Real")
+
+  setupTestSettings()
+
+  // Test: x=0 should map to real_min (-2.5)
+  fpu:pushInt(0)
+  fpu:pushInt(SCREEN_WIDTH)
+  fpu:divXY()
+  fpu:pushExt(@real_range)
+  fpu:mulXY()
+  fpu:pushExt(@settings_data)
+  fpu:addXY()
+  fpu:pullExt(@c_real)
+  assertFloatNear(@c_real, "-2.5", "0.01", "x=0 maps to -2.5")
+
+  // Test: x=SCREEN_WIDTH should map to real_max (1.0)
+  fpu:pushInt(SCREEN_WIDTH)
+  fpu:pushInt(SCREEN_WIDTH)
+  fpu:divXY()
+  fpu:pushExt(@real_range)
+  fpu:mulXY()
+  fpu:pushExt(@settings_data)
+  fpu:addXY()
+  fpu:pullExt(@c_real)
+  assertFloatNear(@c_real, "1.0", "0.01", "x=560 maps to 1.0")
+
+  // Test: x=SCREEN_WIDTH/2 should map to ~-0.75
+  fpu:pushInt(SCREEN_WIDTH / 2)
+  fpu:pushInt(SCREEN_WIDTH)
+  fpu:divXY()
+  fpu:pushExt(@real_range)
+  fpu:mulXY()
+  fpu:pushExt(@settings_data)
+  fpu:addXY()
+  fpu:pullExt(@c_real)
+  assertFloatNear(@c_real, "-0.75", "0.01", "x=280 maps to -0.75")
+end
+
+//
+// Test: Coordinate Mapping - Imaginary Axis
+//
+def testScreenToImag#0
+  printTestHeader("Coordinate Mapping: Screen Y to Imaginary")
+
+  setupTestSettings()
+
+  // Test: y=0 should map to imag_min (-1.0)
+  fpu:pushInt(0)
+  fpu:pushInt(SCREEN_HEIGHT)
+  fpu:divXY()
+  fpu:pushExt(@imag_range)
+  fpu:mulXY()
+  fpu:pushExt(@settings_data+20)
+  fpu:addXY()
+  fpu:pullExt(@c_imag)
+  assertFloatNear(@c_imag, "-1.0", "0.01", "y=0 maps to -1.0")
+
+  // Test: y=SCREEN_HEIGHT should map to imag_max (1.0)
+  fpu:pushInt(SCREEN_HEIGHT)
+  fpu:pushInt(SCREEN_HEIGHT)
+  fpu:divXY()
+  fpu:pushExt(@imag_range)
+  fpu:mulXY()
+  fpu:pushExt(@settings_data+20)
+  fpu:addXY()
+  fpu:pullExt(@c_imag)
+  assertFloatNear(@c_imag, "1.0", "0.01", "y=192 maps to 1.0")
+
+  // Test: y=SCREEN_HEIGHT/2 should map to 0.0
+  fpu:pushInt(SCREEN_HEIGHT / 2)
+  fpu:pushInt(SCREEN_HEIGHT)
+  fpu:divXY()
+  fpu:pushExt(@imag_range)
+  fpu:mulXY()
+  fpu:pushExt(@settings_data+20)
+  fpu:addXY()
+  fpu:pullExt(@c_imag)
+  assertFloatNear(@c_imag, "0.0", "0.01", "y=96 maps to 0.0")
+end
+
+//
+// Test: Color Mapping
+//
+def testIterToColor#0
+  word iter
+  byte color
+
+  printTestHeader("Color Mapping: Iterations to Color")
+
+  // Test: iter=0 (in set) should map to color 0
+  iter = 0
+  if iter == 0
+    color = 0
+  else
+    color = (iter % 15) + 1
+  fin
+  assertEqual(color, 0, "iter=0 maps to color 0 (in set)")
+
+  // Test: iter=1 should map to color 2
+  iter = 1
+  if iter == 0
+    color = 0
+  else
+    color = (iter % 15) + 1
+  fin
+  assertEqual(color, 2, "iter=1 maps to color 2")
+
+  // Test: iter=15 should map to color 1 (wraps)
+  iter = 15
+  if iter == 0
+    color = 0
+  else
+    color = (iter % 15) + 1
+  fin
+  assertEqual(color, 1, "iter=15 maps to color 1 (wrap)")
+
+  // Test: iter=16 should map to color 2
+  iter = 16
+  if iter == 0
+    color = 0
+  else
+    color = (iter % 15) + 1
+  fin
+  assertEqual(color, 2, "iter=16 maps to color 2")
+
+  // Test: iter=255 should map to color 1
+  iter = 255
+  if iter == 0
+    color = 0
+  else
+    color = (iter % 15) + 1
+  fin
+  assertEqual(color, 1, "iter=255 maps to color 1")
+end
+
+//
+// Test: Known Mandelbrot Points
+//
+def testKnownPoints#0
+  byte[10] z_real, z_imag
+  byte[10] z_real_sq, z_imag_sq
+  byte[10] magnitude_sq, temp_fp
+  word iter, iter_limit
+  word escaped
+
+  printTestHeader("Known Mandelbrot Points")
+
+  setupTestSettings()
+  iter_limit = 256
+
+  // Test point 1: c = 0+0i (center of main cardioid, should NOT escape)
+  fpu:pushStr("0.0")
+  fpu:pullExt(@c_real)
+  fpu:pushStr("0.0")
+  fpu:pullExt(@c_imag)
+
+  fpu:pushInt(0)
+  fpu:pullExt(@z_real)
+  fpu:pushInt(0)
+  fpu:pullExt(@z_imag)
+
+  iter = 0
+  escaped = FALSE
+
+  // Do just a few iterations to verify calculation logic
+  while iter < 10 and not escaped
+    fpu:pushExt(@z_real)
+    fpu:dupX()
+    fpu:mulXY()
+    fpu:pullExt(@z_real_sq)
+
+    fpu:pushExt(@z_imag)
+    fpu:dupX()
+    fpu:mulXY()
+    fpu:pullExt(@z_imag_sq)
+
+    fpu:pushExt(@z_real_sq)
+    fpu:pushExt(@z_imag_sq)
+    fpu:addXY()
+    fpu:pullExt(@magnitude_sq)
+
+    fpu:pushExt(@magnitude_sq)
+    fpu:pushStr("4.0")
+    if fpu:cmpXY() == FPUCMPGT
+      escaped = TRUE
+    else
+      fpu:pushStr("2.0")
+      fpu:pushExt(@z_real)
+      fpu:mulXY()
+      fpu:pushExt(@z_imag)
+      fpu:mulXY()
+      fpu:pushExt(@c_imag)
+      fpu:addXY()
+      fpu:pullExt(@temp_fp)
+
+      fpu:pushExt(@z_real_sq)
+      fpu:pushExt(@z_imag_sq)
+      fpu:subXY()
+      fpu:pushExt(@c_real)
+      fpu:addXY()
+      fpu:pullExt(@z_real)
+
+      fpu:pushExt(@temp_fp)
+      fpu:pullExt(@z_imag)
+
+      iter++
+    fin
+  loop
+
+  assertEqual(escaped, FALSE, "Point (0,0) should not escape")
+
+  // Test point 2: c = 2+0i (outside set, should escape quickly)
+  fpu:pushStr("2.0")
+  fpu:pullExt(@c_real)
+  fpu:pushStr("0.0")
+  fpu:pullExt(@c_imag)
+
+  fpu:pushInt(0)
+  fpu:pullExt(@z_real)
+  fpu:pushInt(0)
+  fpu:pullExt(@z_imag)
+
+  iter = 0
+  escaped = FALSE
+
+  while iter < 10 and not escaped
+    fpu:pushExt(@z_real)
+    fpu:dupX()
+    fpu:mulXY()
+    fpu:pullExt(@z_real_sq)
+
+    fpu:pushExt(@z_imag)
+    fpu:dupX()
+    fpu:mulXY()
+    fpu:pullExt(@z_imag_sq)
+
+    fpu:pushExt(@z_real_sq)
+    fpu:pushExt(@z_imag_sq)
+    fpu:addXY()
+    fpu:pullExt(@magnitude_sq)
+
+    fpu:pushExt(@magnitude_sq)
+    fpu:pushStr("4.0")
+    if fpu:cmpXY() == FPUCMPGT
+      escaped = TRUE
+    else
+      fpu:pushStr("2.0")
+      fpu:pushExt(@z_real)
+      fpu:mulXY()
+      fpu:pushExt(@z_imag)
+      fpu:mulXY()
+      fpu:pushExt(@c_imag)
+      fpu:addXY()
+      fpu:pullExt(@temp_fp)
+
+      fpu:pushExt(@z_real_sq)
+      fpu:pushExt(@z_imag_sq)
+      fpu:subXY()
+      fpu:pushExt(@c_real)
+      fpu:addXY()
+      fpu:pullExt(@z_real)
+
+      fpu:pushExt(@temp_fp)
+      fpu:pullExt(@z_imag)
+
+      iter++
+    fin
+  loop
+
+  assertEqual(escaped, TRUE, "Point (2,0) should escape")
+end
+
+//
+// Main test runner
+//
+def runAllTests#0
+  puts("============================================================")
+  putln
+  puts("MANDELBROT RENDERER TEST SUITE")
+  putln
+  puts("============================================================")
+  putln
+  putln
+
+  // Initialize test counters
+  test_count = 0
+  test_passed = 0
+  test_failed = 0
+
+  // Initialize FPU
+  fpu:reset()
+
+  // Run all tests
+  testScreenToReal()
+  putln
+  testScreenToImag()
+  putln
+  testIterToColor()
+  putln
+  testKnownPoints()
+  putln
+
+  // Print summary
+  printTestSummary()
+end
+
+//
+// Entry point
+//
+runAllTests()
+done

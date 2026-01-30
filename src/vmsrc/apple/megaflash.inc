@@ -7,10 +7,10 @@
 ;//
 !cpu 65c02 ; If you're using a megaflash, you have a 65c02 processor
 MF_SLOT       = 4
-MF_CMDREG     = $C480     // Command register
-MF_PARAMREG   = $C481     // Parameter register (read/write)
-MF_STATUSREG  = $C482     // Status register
-MF_IDREG      = $C483     // ID register
+MF_CMDREG     = $C0C0     // Command register (slot 4)
+MF_PARAMREG   = $C0C1     // Parameter register (read/write)
+MF_STATUSREG  = $C0C0     // Status register (same as command)
+MF_IDREG      = $C0C3     // ID register
 
 //
 // MegaFlash FPU Commands
@@ -31,9 +31,11 @@ MF_CMD_FOUT   = $3A       // Format floating point as string
 // MegaFlash Error Codes (in parameter buffer)
 //
 MF_ERR_NONE       = $00   // No error
-MF_ERR_OVERFLOW   = $80   // Overflow error
-MF_ERR_DIV0       = $40   // Division by zero
+MF_ERR_TIMEOUT    = $01   // Operation timeout (software)
+MF_ERR_BADPARAM   = $03   // Invalid parameter / bad data format
 MF_ERR_ILLEGAL    = $20   // Illegal quantity
+MF_ERR_DIV0       = $40   // Division by zero
+MF_ERR_OVERFLOW   = $80   // Overflow error
 
 //
 // Status Register Bits
@@ -43,9 +45,9 @@ MF_STATUS_BUSY    = $80   // Busy flag (bit 7)
 //
 // MBF (Microsoft Binary Format) constants
 //
-MBF_SIZE          = 6     // FAC/ARG size: exp + sign + 4 mantissa bytes
-MBF_EXT_SIZE      = 1     // Extension byte size
-MBF_TOTAL         = 13    // Total buffer size for FAC+ARG+EXT
+MBF_SIZE          = 7     // FAC/ARG size: exp + 4 mantissa bytes + sign + extension
+MBF_EXT_SIZE      = 1     // Extension byte size (now part of MBF_SIZE)
+MBF_TOTAL         = 14    // Total buffer size for FAC (7 bytes) + ARG (7 bytes)
 
 //
 // SANE Extended Format constants (for conversion)

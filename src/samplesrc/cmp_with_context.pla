@@ -1,0 +1,76 @@
+//
+// Test cmp() with same context as fptest_mf
+// Includes same modules and runs operations before compare
+//
+include "inc/cmdsys.plh"
+include "inc/fileio.plh"  // SANE depends on fileio
+include "inc/fpstr.plh"
+include "inc/conio.plh"
+include "inc/fpumf.plh"
+
+byte[80] strBuf
+byte[7] reg0buf
+byte[7] reg1buf
+
+def printFP(label)#0
+    fpumf:pullStr(@strBuf, 1, 8, FPSTR_FIXED)
+    puts(label)
+    puts(@strBuf)
+    putln
+end
+
+def showBothRegs#0
+    fpumf:storMBF(@reg0buf, 0)
+    fpumf:storMBF(@reg1buf, 1)
+
+    puts("  [0]: ")
+    puth(reg0buf.0)
+    puts(" ")
+    puth(reg0buf.5)
+
+    puts(" [1]: ")
+    puth(reg1buf.0)
+    puts(" ")
+    puth(reg1buf.5)
+    putln
+end
+
+def main#0
+    word result
+
+    fpumf:reset()
+
+    puts("\n=== CMP with Context Test ===\n")
+
+    // Do some operations like fptest_mf does
+    puts("\n1. Do some arithmetic first:\n")
+    puts("  3.14159 * 2.0 = ")
+    fpumf:pushStr("3.14159")
+    fpumf:pushStr("2.0")
+    fpumf:mul()
+    printFP("")
+
+    // Now reset like fptest_mf does
+    puts("\n2. Calling reset()...\n")
+    fpumf:reset()
+    showBothRegs()
+
+    // Now do the compare test
+    puts("\n3. After pushStr(6.0) #1:\n")
+    fpumf:pushStr("6.0")
+    showBothRegs()
+
+    puts("\n4. After pushStr(6.0) #2:\n")
+    fpumf:pushStr("6.0")
+    showBothRegs()
+
+    puts("\n5. Calling cmp()...\n")
+    result = fpumf:cmp()
+
+    puts("\nResult: ")
+    puth(result)
+    putln
+end
+
+main
+done

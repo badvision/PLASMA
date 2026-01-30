@@ -1,0 +1,44 @@
+//
+// Test ONLY pushStr - does it write to stackRegs?
+//
+include "inc/cmdsys.plh"
+include "inc/fpumf.plh"
+
+byte[7] buf
+
+def showReg0#0
+    fpumf:storMBF(@buf, 0)
+    puts("  exp=")
+    puth(buf.0)
+    puts(" sgn=")
+    puth(buf.5)
+    putln
+end
+
+def main#0
+    word err
+
+    puts("\n=== Push Only Test ===\n")
+
+    fpumf:reset()
+
+    puts("After reset:\n")
+    showReg0()
+
+    puts("After pushStr(10.0) - err=")
+    err = fpumf:pushStr("10.0")
+    puth(err)
+    putln
+    showReg0()
+
+    puts("After pushStr(5.0) - err=")
+    err = fpumf:pushStr("5.0")
+    puth(err)
+    putln
+    showReg0()
+
+    puts("\nDone.\n")
+end
+
+main
+done

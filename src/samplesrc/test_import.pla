@@ -1,0 +1,4 @@
+include "inc/cmdsys.plh"
+import fpu_mf
+puts("OK\n")
+done

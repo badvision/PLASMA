@@ -1,0 +1,14 @@
+//
+// Test ONLY reset initialization
+//
+include "inc/cmdsys.plh"
+include "inc/fpumf.plh"
+
+def main#0
+    puts("\n=== Reset Test ===\n")
+    fpumf:reset()
+    puts("\nDone - check output above\n")
+end
+
+main
+done

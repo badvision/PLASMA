@@ -1,0 +1,10 @@
+include "inc/cmdsys.plh"
+import fpu_mf
+
+puts("Testing fpu_mf import\n")
+if fpu:reset
+    puts("ERROR\n")
+else
+    puts("OK\n")
+fin
+done

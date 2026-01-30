@@ -1,0 +1,61 @@
+//
+// Diagnostic test - Check stackRegs RIGHT AFTER each pushStr()
+//
+include "inc/cmdsys.plh"
+include "inc/fpumf.plh"
+
+byte[7] reg0buf
+byte[7] reg1buf
+
+def showBothRegs#0
+    // Save stack registers to buffers
+    fpumf:storMBF(@reg0buf, 0)
+    fpumf:storMBF(@reg1buf, 1)
+
+    puts("  [0]: ")
+    puth(reg0buf.0)
+    puts(" ")
+    puth(reg0buf.5)
+
+    puts(" [1]: ")
+    puth(reg1buf.0)
+    puts(" ")
+    puth(reg1buf.5)
+    putln
+end
+
+def main#0
+    word result
+    word err
+
+    fpumf:reset()
+
+    puts("\n=== CMP Diagnostic ===\n")
+
+    puts("\n1. After reset:\n")
+    showBothRegs()
+
+    puts("\n2. After pushStr(6.0) #1:\n")
+    err = fpumf:pushStr("6.0")
+    puts("  pushStr returned: ")
+    puth(err)
+    putln
+    showBothRegs()
+
+    puts("\n3. After pushStr(6.0) #2:\n")
+    err = fpumf:pushStr("6.0")
+    puts("  pushStr returned: ")
+    puth(err)
+    putln
+    showBothRegs()
+
+    puts("\n4. Calling cmp()...\n")
+    result = fpumf:cmp()
+
+    puts("\nResult: ")
+    puth(result)
+    putln
+end
+
+main
+done

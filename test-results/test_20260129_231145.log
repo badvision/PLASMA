@@ -1,0 +1,28 @@
+Initializing JavaFX toolkit for headless operation...
+Jan 29, 2026 11:11:47 PM com.sun.javafx.application.PlatformImpl startup
+WARNING: Unsupported JavaFX configuration: classes were loaded from 'unnamed module @5f15612b'
+JavaFX toolkit initialized
+Switched to Main mode
+Available commands:
+  monitor/m       - Enter Monitor mode (includes debugger functionality)
+  assembler/a     - Enter Assembler mode
+  qq              - Exit terminal
+
+  swlog (sl)     - Toggle softswitch state change logging
+  swstate (ss)   - Display current state of all softswitches
+  reset (re)     - Reset the Apple II
+  step (s) [count] - Step the CPU for count cycles (default: 1)
+  run (g) [count] - Run the CPU for count cycles or until breakpoint (default: 1000000)
+  insertdisk (id) d# - Insert disk image in drive # (1 or 2)
+  ejectdisk (ed) d# - Eject disk from drive # (1 or 2)
+  loadbin (lb) file addr - Load binary file at specified address (hex)
+  savebin (sb) file addr size - Save binary data from memory to file
+  help/?          - Show this help
+  help/?  <cmd>   - Show detailed help for a specific command
+  exit/quit       - Exit the Terminal
+Emulator initialized in command-line focused mode
+Jace Emulator Terminal
+Type ? for help, exit to quit
+JACE>Jan 29, 2026 11:11:47 PM jace.core.SoundMixer lambda$initSound$2
+INFO: Sound system initialized successfully
+Running for 500000 cycles
