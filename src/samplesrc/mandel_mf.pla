@@ -54,6 +54,23 @@ byte[MBF_SIZE] imag_range
 byte[MBF_SIZE] temp_fp
 
 //
+// Pre-computed MBF constants for hot path optimization
+// Avoid string parsing overhead in Mandelbrot iteration loop
+//
+byte[MBF_SIZE] mbf_four   // 4.0 for escape radius test
+byte[MBF_SIZE] mbf_two    // 2.0 for z_imag calculation
+
+//
+// Incremental coordinate calculation for hot path optimization
+// Instead of recalculating c_real/c_imag for each pixel with divisions,
+// we compute deltas once and increment through the coordinate space
+//
+byte[MBF_SIZE] delta_real  // real_range / SCREEN_WIDTH (increment per pixel)
+byte[MBF_SIZE] delta_imag  // imag_range / SCREEN_HEIGHT (increment per row)
+byte[MBF_SIZE] real_min_mbf  // Copy of real_min in MBF format
+byte[MBF_SIZE] imag_min_mbf  // Copy of imag_min in MBF format
+
+//
 // Settings editor state
 //
 const FIELD_REAL_MIN = 0
@@ -109,6 +126,8 @@ byte[t_mouseState] mouseState
 // Default view: real [-2.5, 1.0], imag [-1.0, 1.0]
 //
 def initSettings#0
+  word temp_width, temp_height
+
   // Set real_min = -2.5 (as string)
   strcpy(@settings.real_min, "-2.5")
 
@@ -136,6 +155,37 @@ def initSettings#0
   fpumf:pushStr(@settings.imag_min)
   fpumf:sub()
   fpumf:pullMBF(@imag_range)
+
+  // Pre-compute MBF constants for hot path optimization
+  // These are used millions of times during rendering, so converting once
+  // and using pushMBF() instead of pushStr() eliminates string parsing overhead
+  fpumf:pushStr("4.0")
+  fpumf:pullMBF(@mbf_four)
+  fpumf:pushStr("2.0")
+  fpumf:pullMBF(@mbf_two)
+
+  // Pre-compute coordinate deltas for incremental calculation
+  // This eliminates ~240,000 FP operations per full-screen render!
+  // delta_real = real_range / SCREEN_WIDTH
+  temp_width = SCREEN_WIDTH
+  temp_height = SCREEN_HEIGHT
+
+  fpumf:pushMBF(@real_range)
+  fpumf:pushInt(@temp_width)
+  fpumf:div()
+  fpumf:pullMBF(@delta_real)
+
+  // delta_imag = imag_range / SCREEN_HEIGHT
+  fpumf:pushMBF(@imag_range)
+  fpumf:pushInt(@temp_height)
+  fpumf:div()
+  fpumf:pullMBF(@delta_imag)
+
+  // Store min values in MBF format for fast resets
+  fpumf:pushStr(@settings.real_min)
+  fpumf:pullMBF(@real_min_mbf)
+  fpumf:pushStr(@settings.imag_min)
+  fpumf:pullMBF(@imag_min_mbf)
 end
 
 //
@@ -222,24 +272,6 @@ def mandelbrotIterate(x, y)#1
   word zero
   word cmpResult
 
-  // DEBUG: Show first pixel's values
-  if x == 0 and y == 0
-    puts("DEBUG FIRST PIXEL (0,0):\n")
-    puts("  c_real = ")
-    fpumf:pushMBF(@c_real)
-    fpumf:pullStr(@fpStrBuffer, 3, 6, 0)
-    puts(@fpStrBuffer)
-    putln
-    puts("  c_imag = ")
-    fpumf:pushMBF(@c_imag)
-    fpumf:pullStr(@fpStrBuffer, 3, 6, 0)
-    puts(@fpStrBuffer)
-    putln
-    puts("  max_iter = ")
-    puti(settings.max_iter)
-    putln
-  fin
-
   // Initialize z = 0 + 0i
   zero = 0
   fpumf:pushInt(@zero)
@@ -274,31 +306,17 @@ def mandelbrotIterate(x, y)#1
     // Note: First push becomes Y, second push becomes X
     // cmpXY() compares Y vs X, so this compares magnitude_sq vs 4.0
     fpumf:pushMBF(@magnitude_sq)
-    fpumf:pushStr("4.0")
+    fpumf:pushMBF(@mbf_four)  // Use pre-computed constant (HOT PATH OPTIMIZATION)
     cmpResult = fpumf:cmp()
 
-    // DEBUG: Show first iteration of first pixel
-    if x == 0 and y == 0 and iter == 0
-      puts("  First iteration:\n")
-      puts("    magnitude_sq = ")
-      fpumf:pushMBF(@magnitude_sq)
-      fpumf:pullStr(@fpStrBuffer, 3, 6, 0)
-      puts(@fpStrBuffer)
-      putln
-      puts("    cmp result = ")
-      puti(cmpResult)
-      putln
-    fin
-
     // If magnitude_sq > 4.0, then escaped!
-    // Stack: [magnitude_sq=Y, 4.0=X]
-    // RPN question: "Is X < Y?" = "Is 4.0 < magnitude_sq?"
-    // If magnitude_sq > 4.0: answer is TRUE → returns FPUCMPLT
-    if cmpResult == FPUCMPLT
+    // cmp() computes Y - X = magnitude_sq - 4.0
+    // If magnitude_sq > 4.0: result is positive → returns FPUCMPGT
+    if cmpResult == FPUCMPGT
       escaped = TRUE
     else
       // Calculate new z_imag = 2 * z_real * z_imag + c_imag
-      fpumf:pushStr("2.0")
+      fpumf:pushMBF(@mbf_two)  // Use pre-computed constant (HOT PATH OPTIMIZATION)
       fpumf:pushMBF(@z_real)
       fpumf:mul()
       fpumf:pushMBF(@z_imag)
@@ -324,15 +342,6 @@ def mandelbrotIterate(x, y)#1
   loop
 
   // Return iteration count (0 if in set, iter if escaped)
-  // DEBUG: Show final result
-  if x == 0 and y == 0
-    puts("  FINAL: escaped=")
-    puti(escaped)
-    puts(" iter=")
-    puti(iter)
-    putln
-  fin
-
   if escaped
     return iter
   else
@@ -510,7 +519,7 @@ def testSinglePixel#0
       // Note: First push becomes Y, second push becomes X
       // cmpXY() compares Y vs X, so this compares magnitude_sq vs 4.0
       fpumf:pushMBF(@magnitude_sq)
-      fpumf:pushStr("4.0")
+      fpumf:pushMBF(@mbf_four)  // Use pre-computed constant
       cmpResult = fpumf:cmp()
 
       // Show details for first 3 iterations
@@ -550,14 +559,13 @@ def testSinglePixel#0
       fin
 
       // If magnitude_sq > 4.0, then escaped!
-      // Stack: [magnitude_sq=Y, 4.0=X]
-      // RPN question: "Is X < Y?" = "Is 4.0 < magnitude_sq?"
-      // If magnitude_sq > 4.0: answer is TRUE → returns FPUCMPLT
-      if cmpResult == FPUCMPLT
+      // cmp() computes Y - X = magnitude_sq - 4.0
+      // If magnitude_sq > 4.0: result is positive → returns FPUCMPGT
+      if cmpResult == FPUCMPGT
         escaped = TRUE
       else
         // Calculate new z_imag = 2 * z_real * z_imag + c_imag
-        fpumf:pushStr("2.0")
+        fpumf:pushMBF(@mbf_two)  // Use pre-computed constant
         fpumf:pushMBF(@z_real)
         fpumf:mul()
         fpumf:pushMBF(@z_imag)
@@ -610,10 +618,15 @@ end
 
 //
 // Render the full Mandelbrot set
+// OPTIMIZATION: Uses incremental coordinate calculation instead of
+// recalculating c_real/c_imag for each pixel (eliminates ~240K FP ops!)
 //
 def renderMandelbrot#0
   word x, y
   byte key
+  word iter
+  byte color
+
   // Initialize DHGR graphics mode
   dhgrMode(DHGR_COLOR_MODE)
   dhgrSurfScr(OP_SRC)
@@ -621,10 +634,34 @@ def renderMandelbrot#0
   dcgrColor(CLR_BLACK)
   dhgrClearBl7(0, 0, SCR_WIDTH7, SCR_HEIGHT)
 
-  // Render each pixel
+  // Start at top-left corner of complex plane
+  fpumf:pushMBF(@imag_min_mbf)
+  fpumf:pullMBF(@c_imag)
+
+  // Render each pixel using incremental coordinate calculation
   for y = 0 to SCREEN_HEIGHT - 1
+    // Reset to left edge of row
+    fpumf:pushMBF(@real_min_mbf)
+    fpumf:pullMBF(@c_real)
+
     for x = 0 to SCREEN_WIDTH - 1
-      renderPixel(x, y)
+      // Visual feedback: draw magenta dot at current position
+      dcgrColor(CLR_MAGENTA)
+      dcgrPixel(x, y)
+
+      // c_real and c_imag are already set - calculate Mandelbrot iteration
+      iter = mandelbrotIterate(x, y)
+
+      // Map iteration to color and plot final pixel
+      color = iterToColor(iter)
+      dcgrColor(color)
+      dcgrPixel(x, y)
+
+      // Increment c_real for next pixel (move right)
+      fpumf:pushMBF(@c_real)
+      fpumf:pushMBF(@delta_real)
+      fpumf:add()
+      fpumf:pullMBF(@c_real)
 
       // Check for TAB interrupt every 10 pixels for performance
       if (x % 10) == 0
@@ -638,6 +675,12 @@ def renderMandelbrot#0
         fin
       fin
     next
+
+    // Increment c_imag for next row (move down)
+    fpumf:pushMBF(@c_imag)
+    fpumf:pushMBF(@delta_imag)
+    fpumf:add()
+    fpumf:pullMBF(@c_imag)
   next
 
   // Stay in graphics mode to display the result
@@ -1314,12 +1357,6 @@ def main#0
 
   // Initialize settings with default view
   initSettings
-
-  // TEST: Display coordinate mapping before rendering
-  testCoordinates
-
-  // TEST: Single pixel calculation with detailed output
-  testSinglePixel
 
   // Detect mouse hardware
   hasMouse = detectMouse()

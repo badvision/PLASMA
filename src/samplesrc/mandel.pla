@@ -52,6 +52,23 @@ byte imag_range[10]
 byte temp_fp[10]
 
 //
+// Pre-computed Extended format constants for hot path optimization
+// Avoid string parsing overhead in Mandelbrot iteration loop
+//
+byte ext_four[10]   // 4.0 for escape radius test
+byte ext_two[10]    // 2.0 for z_imag calculation
+
+//
+// Incremental coordinate calculation for hot path optimization
+// Instead of recalculating c_real/c_imag for each pixel with divisions,
+// we compute deltas once and increment through the coordinate space
+//
+byte delta_real[10]  // real_range / SCREEN_WIDTH (increment per pixel)
+byte delta_imag[10]  // imag_range / SCREEN_HEIGHT (increment per row)
+byte real_min_ext[10]  // Copy of real_min in Extended format
+byte imag_min_ext[10]  // Copy of imag_min in Extended format
+
+//
 // Settings editor state
 //
 const FIELD_REAL_MIN = 0
@@ -107,6 +124,8 @@ byte[t_mouseState] mouseState
 // Default view: real [-2.5, 1.0], imag [-1.0, 1.0]
 //
 def initSettings#0
+  word temp_width, temp_height
+
   // Set real_min = -2.5
   fpu:pushStr("-2.5")
   fpu:pullExt(@settings.real_min)
@@ -138,6 +157,37 @@ def initSettings#0
   fpu:pushExt(@settings.imag_min)
   fpu:subXY()
   fpu:pullExt(@imag_range)
+
+  // Pre-compute Extended format constants for hot path optimization
+  // These are used millions of times during rendering, so converting once
+  // and using pushExt() instead of pushStr() eliminates string parsing overhead
+  fpu:pushStr("4.0")
+  fpu:pullExt(@ext_four)
+  fpu:pushStr("2.0")
+  fpu:pullExt(@ext_two)
+
+  // Pre-compute coordinate deltas for incremental calculation
+  // This eliminates ~240,000 FP operations per full-screen render!
+  // delta_real = real_range / SCREEN_WIDTH
+  temp_width = SCREEN_WIDTH
+  temp_height = SCREEN_HEIGHT
+
+  fpu:pushExt(@real_range)
+  fpu:pushInt(@temp_width)
+  fpu:divXY()
+  fpu:pullExt(@delta_real)
+
+  // delta_imag = imag_range / SCREEN_HEIGHT
+  fpu:pushExt(@imag_range)
+  fpu:pushInt(@temp_height)
+  fpu:divXY()
+  fpu:pullExt(@delta_imag)
+
+  // Store min values in Extended format for fast resets
+  fpu:pushExt(@settings.real_min)
+  fpu:pullExt(@real_min_ext)
+  fpu:pushExt(@settings.imag_min)
+  fpu:pullExt(@imag_min_ext)
 end
 
 //
@@ -224,24 +274,6 @@ def mandelbrotIterate(x, y)#1
   word zero
   word cmpResult
 
-  // DEBUG: Show first pixel's values
-  if x == 0 and y == 0
-    puts("DEBUG FIRST PIXEL (0,0):\n")
-    puts("  c_real = ")
-    fpu:pushExt(@c_real)
-    fpu:pullStr(@fpStrBuffer, 3, 6, 0)
-    puts(@fpStrBuffer)
-    putln
-    puts("  c_imag = ")
-    fpu:pushExt(@c_imag)
-    fpu:pullStr(@fpStrBuffer, 3, 6, 0)
-    puts(@fpStrBuffer)
-    putln
-    puts("  max_iter = ")
-    puti(settings.max_iter)
-    putln
-  fin
-
   // Initialize z = 0 + 0i
   zero = 0
   fpu:pushInt(@zero)
@@ -275,28 +307,15 @@ def mandelbrotIterate(x, y)#1
     // Compare magnitude_sq with 4.0
     // Note: pushes are X=4.0, Y=magnitude_sq, so we compare 4.0 < magnitude_sq
     fpu:pushExt(@magnitude_sq)
-    fpu:pushStr("4.0")
+    fpu:pushExt(@ext_four)  // Use pre-computed constant (HOT PATH OPTIMIZATION)
     cmpResult = fpu:cmpXY()
-
-    // DEBUG: Show first iteration of first pixel
-    if x == 0 and y == 0 and iter == 0
-      puts("  First iteration:\n")
-      puts("    magnitude_sq = ")
-      fpu:pushExt(@magnitude_sq)
-      fpu:pullStr(@fpStrBuffer, 3, 6, 0)
-      puts(@fpStrBuffer)
-      putln
-      puts("    cmp result = ")
-      puti(cmpResult)
-      putln
-    fin
 
     // If 4.0 < magnitude_sq, then magnitude_sq > 4.0 (escaped!)
     if cmpResult == FPUCMPLT
       escaped = TRUE
     else
       // Calculate new z_imag = 2 * z_real * z_imag + c_imag
-      fpu:pushStr("2.0")
+      fpu:pushExt(@ext_two)  // Use pre-computed constant (HOT PATH OPTIMIZATION)
       fpu:pushExt(@z_real)
       fpu:mulXY()
       fpu:pushExt(@z_imag)
@@ -489,7 +508,7 @@ def testSinglePixel#0
     // Compare magnitude_sq with 4.0
     // Note: pushes are X=4.0, Y=magnitude_sq, so we compare 4.0 < magnitude_sq
     fpu:pushExt(@magnitude_sq)
-    fpu:pushStr("4.0")
+    fpu:pushExt(@ext_four)  // Use pre-computed constant (HOT PATH OPTIMIZATION)
     cmpResult = fpu:cmpXY()
 
     // Show details for first 3 iterations
@@ -533,7 +552,7 @@ def testSinglePixel#0
       escaped = TRUE
     else
       // Calculate new z_imag = 2 * z_real * z_imag + c_imag
-      fpu:pushStr("2.0")
+      fpu:pushExt(@ext_two)  // Use pre-computed constant (HOT PATH OPTIMIZATION)
       fpu:pushExt(@z_real)
       fpu:mulXY()
       fpu:pushExt(@z_imag)
@@ -581,6 +600,9 @@ end
 def renderMandelbrot#0
   word x, y
   byte key
+  word iter
+  byte color
+
   // Initialize DHGR graphics mode
   dhgrMode(DHGR_COLOR_MODE)
   dhgrSurfScr(OP_SRC)
@@ -588,10 +610,34 @@ def renderMandelbrot#0
   dcgrColor(CLR_BLACK)
   dhgrClearBl7(0, 0, SCR_WIDTH7, SCR_HEIGHT)
 
-  // Render each pixel
+  // Start at top-left corner of complex plane
+  fpu:pushExt(@imag_min_ext)
+  fpu:pullExt(@c_imag)
+
+  // Render each pixel using incremental coordinate calculation
   for y = 0 to SCREEN_HEIGHT - 1
+    // Reset to left edge of row
+    fpu:pushExt(@real_min_ext)
+    fpu:pullExt(@c_real)
+
     for x = 0 to SCREEN_WIDTH - 1
-      renderPixel(x, y)
+      // Visual feedback: draw magenta dot at current position
+      dcgrColor(CLR_MAGENTA)
+      dcgrPixel(x, y)
+
+      // c_real and c_imag are already set - calculate Mandelbrot iteration
+      iter = mandelbrotIterate(x, y)
+
+      // Map iteration to color and plot final pixel
+      color = iterToColor(iter)
+      dcgrColor(color)
+      dcgrPixel(x, y)
+
+      // Increment c_real for next pixel (move right)
+      fpu:pushExt(@c_real)
+      fpu:pushExt(@delta_real)
+      fpu:addXY()
+      fpu:pullExt(@c_real)
 
       // Check for TAB interrupt every 10 pixels for performance
       if (x % 10) == 0
@@ -605,6 +651,12 @@ def renderMandelbrot#0
         fin
       fin
     next
+
+    // Increment c_imag for next row (move down)
+    fpu:pushExt(@c_imag)
+    fpu:pushExt(@delta_imag)
+    fpu:addXY()
+    fpu:pullExt(@c_imag)
   next
 
   // Stay in graphics mode to display the result

@@ -81,6 +81,7 @@ struc t_fpu
     word dupX
     word swapXY
     word clearX
+    word dumpStack
     word add
     word sub
     word mul

@@ -61,7 +61,7 @@ predef loadInt(pInt,reg), loadSgl(pSgl,reg), loadDbl(pDbl,reg), loadMBF(pMBF,reg
 predef storInt(pInt,reg), storSgl(pSgl,reg), storDbl(pDbl,reg), storMBF(pMBF,reg), storStr(pStr,intdigits,fracdigits,format,reg)
 predef pushExt(pExt), pullExt(pExt), loadExt(pExt,reg), storExt(pExt,reg)
 predef shiftUp, shiftDown, rotateUp, rotateDown, dup, swap, clear
-predef dumpMBF(label, pMBF)#0
+predef dumpMBF(label, pMBF)#0, dumpStack#0
 predef add, sub, mul, div, rem
 predef neg, abs, type, cmp, logb, scalb(scale), trunc, round, sqrt, squared
 predef cos, sin, tan, atan, asin, acos, sinh, cosh, tanh, sec, csc, cot
@@ -79,7 +79,7 @@ word = @pushInt, @pushSgl, @pushDbl, @pushMBF, @pushStr
 word = @pullInt, @pullSgl, @pullDbl, @pullMBF, @pullStr
 word = @loadInt, @loadSgl, @loadDbl, @loadMBF, @loadStr
 word = @storInt, @storSgl, @storDbl, @storMBF, @storStr
-word = @shiftUp, @shiftDown, @rotateUp, @rotateDown, @dup, @swap, @clear
+word = @shiftUp, @shiftDown, @rotateUp, @rotateDown, @dup, @swap, @clear, @dumpStack
 word = @add, @sub, @mul, @div, @rem
 word = @neg, @abs, @type, @cmp
 word = @logb, @scalb, @trunc, @round, @sqrt, @squared
@@ -118,7 +118,7 @@ word stackRegs[4]
 // MegaFlash hardware state
 //
 byte mfAvailable = FALSE
-byte[MBF_TOTAL] mbfBuffer  // Buffer for MBF format conversions
+byte[MBF_SIZE] mbfBuffer  // Buffer for MBF format conversions
 
 //
 // Import SANE library for fallback and format conversions
@@ -572,6 +572,13 @@ def swap
     return 0
 end
 
+def dumpStack#0
+    puts("Stack: X="); puth(stackRegs[0]->0)
+    puts(" Y="); puth(stackRegs[1]->0)
+    puts(" Z="); puth(stackRegs[2]->0)
+    puts(" T="); puth(stackRegs[3]->0); putln
+end
+
 def _swap(passthru) // Internal version with passthru
     word temp
     temp = stackRegs[0]
@@ -856,28 +863,58 @@ def pushStr(pStr)
     byte[t_extended] tempExt
     word temp
 
-    // Rotate stack: X becomes T, T becomes Z, Z becomes Y, Y becomes X
+    // Parse string to Extended format FIRST - NEEDS SANE ZP PROTECTION!
+    // Do this BEFORE rotating stack so we can fail cleanly
+    sane:saveZP()
+    err = sane:restoreZP(str2ext(pStr, @tempExt))
+    if err
+        return err
+    fin
+
+    // Convert Extended to MBF before rotating
+    err = extendedToMBF(@tempExt, @mbfBuffer)
+    if err
+        return err
+    fin
+
+    // Now rotate stack: X becomes T, T becomes Z, Z becomes Y, Y becomes X
     temp = stackRegs[3]
     stackRegs[3] = stackRegs[2]
     stackRegs[2] = stackRegs[1]
     stackRegs[1] = stackRegs[0]
     stackRegs[0] = temp
 
-    // Parse string to Extended format - NEEDS SANE ZP PROTECTION!
-    sane:saveZP()
-    err = sane:restoreZP(str2ext(pStr, @tempExt))
-    if err; return err; fin
+    // Copy converted value from buffer to stack
+    stackRegs[0]->0 = mbfBuffer:0
+    stackRegs[0]->1 = mbfBuffer:1
+    stackRegs[0]->2 = mbfBuffer:2
+    stackRegs[0]->3 = mbfBuffer:3
+    stackRegs[0]->4 = mbfBuffer:4
+    stackRegs[0]->5 = mbfBuffer:5
+    stackRegs[0]->6 = mbfBuffer:6
 
-    // Convert Extended to MBF
-    return extendedToMBF(@tempExt, stackRegs[0])
+    return 0
 end
 def pullStr(pStr, intdigits, fracdigits, format)
     byte err
     byte[t_extended] tempExt
 
+    // Check if value is zero (exp byte = 0 in MBF)
+    if stackRegs[0]->0 == 0
+        // Zero value - write "0.0" directly without calling SANE
+        // This avoids a SANE bug where ext2str() on all-zeros Extended corrupts state
+        pStr->0 = '0'
+        pStr->1 = '.'
+        pStr->2 = '0'
+        pStr->3 = 0  // null terminator
+        return _drop(0)
+    fin
+
     // Convert MBF to Extended
     err = MBFToExtended(stackRegs[0], @tempExt)
-    if err; return _drop(err); fin
+    if err
+        return _drop(err)
+    fin
 
     // Convert Extended to string - NEEDS SANE ZP PROTECTION!
     sane:saveZP()
@@ -1002,10 +1039,7 @@ def add
     return _drop(err)
 end
 
-//
-// DIAGNOSTIC: Dump MBF bytes
-//
-def sub()#1
+def sub
     byte err
     byte[t_extended] tempExt0
     byte[t_extended] tempExt1
@@ -1016,7 +1050,7 @@ def sub()#1
         MBFToExtended(stackRegs[0], @tempExt0)
         sane:saveZP()
         err = sane:restoreZP(sane:op2FP(FFEXT|FOSUB, @tempExt1, @tempExt0))
-        if err; return err; fin
+        if err; return _drop(err); fin
         err = extendedToMBF(@tempExt1, stackRegs[1])
         return _drop(err)
     fin
@@ -1031,12 +1065,10 @@ def sub()#1
 
     // Step 2: Add Y + (-X) using hardware
     err = execBinaryOp(MF_CMD_FADD)
-    if err; return err; fin
+    if err; return _drop(err); fin
 
     // Drop and return
-    err = _drop(err)
-
-    return err
+    return _drop(err)
 end
 
 def mul
@@ -1141,42 +1173,36 @@ end
 
 def cmp()#1
     byte err
-    byte[MBF_SIZE] resultCopy  // Preserve result before stack operations
+    byte resultExp
+    byte resultSign
 
-    if !mfAvailable
-        // SANE fallback - use sub() then interpret result
-        return sub()  // TODO: Need to convert sub result to comparison result
-    fin
-
-    // Compute Y - X using sub()
+    // Compute Y - X using sub() to compare values
+    // sub() drops both operands and leaves result on stack
     err = sub()
     if err
-        // Clean up stack before returning error
-        shiftDown()
+        // sub() already called _drop() on error path, so don't drop again
         return err
     fin
 
-    // CRITICAL FIX: Copy result NOW before stack manipulation
-    // sub() has already dropped the stack once, putting result in stackRegs[0]
-    // We must preserve this result before calling shiftDown() again
-    memcpy(@resultCopy, stackRegs[0], MBF_SIZE)
+    // Now stackRegs[0] contains Y - X result
+    // Capture the result's exponent and sign before dropping
+    resultExp = stackRegs[0]->0
+    resultSign = stackRegs[0]->5
 
-    // Drop the result from FPU stack (maintains stack depth invariant)
+    // Drop the result to clean up stack
     shiftDown()
 
-    // Now interpret the COPIED result (not stackRegs[0] which is now invalid)
-    // Check if result is zero
-    if resultCopy.0 == 0
+    // If exponent is 0, result is zero (Y == X)
+    if resultExp == 0
         return FPUCMPEQ
     fin
 
-    // Check sign of result
-    if resultCopy.5 & $80  // Negative (Y < X)
-        return FPUCMPLT  // Y < X
+    // Check sign bit to determine if negative (Y < X) or positive (Y > X)
+    if resultSign & $80
+        return FPUCMPLT
     fin
 
-    // Positive (Y > X)
-    return FPUCMPGT  // Y > X
+    return FPUCMPGT
 end
 
 def logb
@@ -2031,8 +2057,12 @@ def reset
     word zero
     word saneResult
     word finalResult
+    byte firstInit
 
     zero = 0
+    firstInit = FALSE
+
+    // Initialize SANE on every reset (like fpu.pla does)
     saneResult = sane:initFP()
 
     if saneResult < 0
@@ -2040,15 +2070,22 @@ def reset
         return -1
     fin
 
+    // Save SANE ZP state after initialization (like fpu.pla does)
     sane:saveZP()
 
-    // Detect MegaFlash hardware
-    mfAvailable = detectMegaFlash()
+    // Check if this is first initialization
+    if !saneInit
+        saneInit = 1
+        firstInit = TRUE
 
-    if mfAvailable
-        puts("Using MegaFlash hardware acceleration\n")
-    else
-        puts("Using SANE software floating point\n")
+        // Detect MegaFlash hardware (only on first init)
+        mfAvailable = detectMegaFlash()
+
+        if mfAvailable
+            puts("Using MegaFlash hardware acceleration\n")
+        else
+            puts("Using SANE software floating point\n")
+        fin
     fin
 
     // Initialize stack registers (MBF format)
@@ -2064,15 +2101,15 @@ def reset
         stackRegs[i]->6 = 0
     next
 
-    // Initialize MBF constants by converting from Extended
-    extendedToMBF(@ext_one, @mbf_one)
-    extendedToMBF(@ext_two, @mbf_two)
-    extendedToMBF(@ext_negOne, @mbf_negOne)
-    extendedToMBF(@ext_ln2, @mbf_ln2)
+    // Initialize MBF constants by converting from Extended (only on first init)
+    if firstInit
+        extendedToMBF(@ext_one, @mbf_one)
+        extendedToMBF(@ext_two, @mbf_two)
+        extendedToMBF(@ext_negOne, @mbf_negOne)
+        extendedToMBF(@ext_ln2, @mbf_ln2)
+    fin
 
-    finalResult = sane:restoreZP(0)
-
-    return finalResult
+    return 0
 end
 
 //

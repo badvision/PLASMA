@@ -355,6 +355,10 @@ def testSubtract#0
     printFP("")
     puts("        (should be 0.0)\n")
 
+    // DEBUG: Check stack state after subtract tests
+    // puts("\nDEBUG: Stack after testSubtract: ")
+    // fpumf:dumpStack()
+
     puts("\nPress any key for compare test...")
     getc()
 end
@@ -366,6 +370,11 @@ def testCompare#0
     word cmpResult
 
     puts("\n=== Compare Operations Test ===\n")
+
+    // DEBUG: Try refreshing SANE state
+    fpumf:pushStr("1.0")
+    fpumf:shiftDown()
+    puts("DEBUG: Warmed up SANE\n")
 
     // Test 1: 10.0 cmp 5.0 (10 > 5)
     puts("\n========================================\n")
@@ -481,10 +490,6 @@ def main#0
         key = getc()
 
         testSubtract()
-
-        // Reset FPU library to clean state before compare tests
-        puts("\n>>> Resetting FPU library...\n")
-        fpumf:reset()
 
         puts("\nPress any key for compare test...")
         key = getc()
